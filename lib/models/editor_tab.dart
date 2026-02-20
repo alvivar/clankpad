@@ -27,7 +27,16 @@ class EditorTab {
     required this.title,
     this.savedContent = '',
     String initialContent = '',
-  })  : controller = TextEditingController(text: initialContent),
+  })  : controller = TextEditingController.fromValue(
+          TextEditingValue(
+            text: initialContent,
+            // Explicit offset 0 instead of the default -1. A -1 selection is
+            // invalid and EditableText will not render a cursor for it unless
+            // a focus-change event fires to correct it — which never happens
+            // on the keyboard-shortcut path where focus stays on the same node.
+            selection: const TextSelection.collapsed(offset: 0),
+          ),
+        ),
         scrollController = ScrollController(),
         isDirtyNotifier = ValueNotifier<bool>(false);
 
