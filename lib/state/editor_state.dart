@@ -88,6 +88,60 @@ class EditorState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Public: load a file into the editor.
+  //
+  // Reuses the active tab if it is empty and untitled (matches the standard
+  // "open replaces blank tab" behavior). Otherwise appends a new tab.
+  // The caller is responsible for duplicate-detection and path normalization
+  // before calling this.
+  void loadFileIntoTab(String filePath, String title, String content) {
+    final active = _tabs[_activeTabIndex];
+    final reuseActive =
+        active.filePath == null && active.controller.text.isEmpty;
+
+    if (reuseActive) {
+      // Mutate in place — no new tab, no ID change.
+      active.filePath = filePath;
+      active.title = title;
+      active.savedContent = content;
+      // Setting controller.text fires the listener, which sets isDirtyNotifier
+      // = (content != savedContent) = false. Correct.
+      active.controller.text = content;
+    } else {
+      final tab = _buildTab(
+        filePath: filePath,
+        title: title,
+        initialContent: content,
+        savedContent: content,
+      );
+      _tabs.add(tab);
+      _activeTabIndex = _tabs.length - 1;
+    }
+
+    notifyListeners();
+  }
+
+  // Public: update tab state after a successful file write.
+  //
+  // Always updates savedContent (and recomputes isDirty synchronously).
+  // filePath and title are only updated when non-null — pass them on Save As,
+  // omit them (or pass null) on a plain Save where the path hasn't changed.
+  void onTabSaved(
+    int index, {
+    required String savedContent,
+    String? filePath,
+    String? title,
+  }) {
+    final tab = _tabs[index];
+    tab.savedContent = savedContent;
+    if (filePath != null) tab.filePath = filePath;
+    if (title != null) tab.title = title;
+    // Recompute dirty synchronously — the controller listener won't fire
+    // again unless the text changes.
+    tab.isDirtyNotifier.value = tab.controller.text != tab.savedContent;
+    notifyListeners(); // title or path may have changed
+  }
+
   @override
   void dispose() {
     for (final tab in _tabs) {

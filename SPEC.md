@@ -381,12 +381,12 @@ lib/
 
 **End state:** the app is genuinely usable. Open, edit, and save real files. All file-related edge cases handled. A human can do real work and test every file operation.
 
-- [ ] Open file (`Ctrl+O`)
-- [ ] Save (`Ctrl+S`)
-- [ ] Save As (`Ctrl+Shift+S`)
-- [ ] Add Save option to dirty-close dialog
-- [ ] Switch to existing tab if file already open (normalize paths: `File(path).absolute.path.toLowerCase()`)
-- [ ] Save failure: modal error dialog, tab stays dirty
+- [x] Open file (`Ctrl+O`)
+- [x] Save (`Ctrl+S`)
+- [x] Save As (`Ctrl+Shift+S`)
+- [x] Add Save option to dirty-close dialog
+- [x] Switch to existing tab if file already open (normalize paths: `File(path).absolute.path.toLowerCase()`)
+- [x] Save failure: modal error dialog, tab stays dirty
 
 ### Phase 3 — Persistence + AI Diff
 

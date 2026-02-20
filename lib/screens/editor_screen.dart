@@ -1,6 +1,10 @@
+import 'dart:io';
+
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../models/editor_tab.dart';
 import '../models/intents.dart';
 import '../services/ai_service.dart';
 import '../state/editor_state.dart';
@@ -24,11 +28,10 @@ class _EditorScreenState extends State<EditorScreen> {
   bool _editorReadOnly = false;
 
   // Snapshot captured the moment the Ctrl+K popup opens.
-  // The AI call uses these frozen values so editing-while-waiting is irrelevant.
   String _snapshotDocumentText = '';
   TextSelection _snapshotSelection = const TextSelection.collapsed(offset: 0);
 
-  // Guard against re-entrant close attempts while a dirty dialog is showing.
+  // Guards against re-entrant close attempts while a dialog is showing.
   bool _closingTab = false;
 
   // ── Convenience ─────────────────────────────────────────────────────────────
@@ -49,34 +52,126 @@ class _EditorScreenState extends State<EditorScreen> {
     super.dispose();
   }
 
-  void _onEditorStateChanged() {
-    // EditorState notifies only on structural changes (add/close/switch tab,
-    // title change). Keystrokes never call notifyListeners() — they update
-    // isDirtyNotifier directly, which each tab chip handles individually.
-    setState(() {});
+  void _onEditorStateChanged() => setState(() {});
+
+  // ── File helpers ─────────────────────────────────────────────────────────────
+
+  // Extracts a bare filename from an absolute path, handling both \ and /.
+  static String _fileNameFromPath(String path) =>
+      path.replaceAll('\\', '/').split('/').last;
+
+  // Returns a sensible default filename for the Save As dialog.
+  static String _suggestedSaveName(EditorTab tab) {
+    if (tab.filePath != null) return _fileNameFromPath(tab.filePath!);
+    final title = tab.title;
+    return title.contains('.') ? title : '$title.txt';
   }
 
-  // ── AI prompt ───────────────────────────────────────────────────────────────
+  // ── Open file ────────────────────────────────────────────────────────────────
+
+  Future<void> _openFile() async {
+    final picked = await openFile();
+    if (picked == null) return; // user cancelled
+
+    // Resolve to an absolute path and normalise for comparison.
+    final absPath = File(picked.path).absolute.path;
+    final normalised = absPath.toLowerCase();
+
+    // Switch to the existing tab if the file is already open.
+    // Uses File(path).absolute.path.toLowerCase() on both sides per the spec.
+    final existingIndex = _state.tabs.indexWhere(
+      (t) =>
+          t.filePath != null &&
+          File(t.filePath!).absolute.path.toLowerCase() == normalised,
+    );
+    if (existingIndex != -1) {
+      _state.switchTab(existingIndex);
+      return;
+    }
+
+    // Read the file content.
+    String content;
+    try {
+      content = await File(absPath).readAsString();
+    } catch (e) {
+      if (!mounted) return;
+      await _showErrorDialog(
+        title: 'Could not open file',
+        message: e.toString(),
+      );
+      return;
+    }
+
+    _state.loadFileIntoTab(absPath, _fileNameFromPath(absPath), content);
+  }
+
+  // ── Save / Save As ───────────────────────────────────────────────────────────
+
+  // Saves the tab at [index]. Opens Save As when the tab has no file path.
+  // Returns true if the file was written successfully, false if the user
+  // cancelled Save As or if a write error occurred.
+  Future<bool> _saveTab(int index) async {
+    final tab = _state.tabs[index];
+
+    // Nothing to do: file-backed tab that is already clean.
+    if (tab.filePath != null && !tab.isDirty) return true;
+
+    if (tab.filePath != null) {
+      return _writeFile(tab.filePath!, tab.controller.text, index);
+    } else {
+      return _saveTabAs(index);
+    }
+  }
+
+  // Opens the Save As dialog and writes the file.
+  Future<bool> _saveTabAs(int index) async {
+    final tab = _state.tabs[index];
+
+    final location = await getSaveLocation(suggestedName: _suggestedSaveName(tab));
+    if (location == null) return false; // user cancelled
+
+    return _writeFile(location.path, tab.controller.text, index);
+  }
+
+  // Performs the actual file write and updates EditorState on success.
+  // Shows an error dialog on failure and returns false.
+  Future<bool> _writeFile(String path, String content, int index) async {
+    try {
+      await File(path).writeAsString(content);
+      _state.onTabSaved(
+        index,
+        savedContent: content,
+        // Always pass filePath and title so Save As correctly updates both.
+        filePath: path,
+        title: _fileNameFromPath(path),
+      );
+      return true;
+    } catch (e) {
+      if (!mounted) return false;
+      // Do NOT update savedContent or clear isDirty — the tab stays dirty.
+      await _showErrorDialog(
+        title: 'Save failed',
+        message: e.toString(),
+      );
+      return false;
+    }
+  }
+
+  // ── AI prompt ────────────────────────────────────────────────────────────────
 
   void _openAiPrompt() {
     if (_aiPromptVisible) return;
 
     final controller = _state.activeTab.controller;
-    final text = controller.text;
-    final selection = controller.selection;
 
     setState(() {
-      _snapshotDocumentText = text;
-      _snapshotSelection = selection;
+      _snapshotDocumentText = controller.text;
+      _snapshotSelection = controller.selection;
       _aiPromptVisible = true;
     });
   }
 
-  void _dismissAiPrompt() {
-    setState(() {
-      _aiPromptVisible = false;
-    });
-  }
+  void _dismissAiPrompt() => setState(() => _aiPromptVisible = false);
 
   Future<void> _submitAiPrompt(String prompt) async {
     final sel = _snapshotSelection;
@@ -87,9 +182,7 @@ class _EditorScreenState extends State<EditorScreen> {
       _editorReadOnly = true;
     });
 
-    // editTarget is the selected text, or the full document if no selection.
-    final editTarget =
-        sel.isCollapsed ? docText : sel.textInside(docText);
+    final editTarget = sel.isCollapsed ? docText : sel.textInside(docText);
 
     final result = await AiService().getCompletion(
       documentText: docText,
@@ -99,13 +192,10 @@ class _EditorScreenState extends State<EditorScreen> {
 
     if (!mounted) return;
 
-    // Apply result: replace the edit target range (or full content) with the
-    // AI output, then place the cursor at the end of the inserted text.
     final String newText;
     final int newCursorPos;
 
     if (sel.isCollapsed) {
-      // No selection — replace the entire document.
       newText = result;
       newCursorPos = result.length;
     } else {
@@ -118,12 +208,10 @@ class _EditorScreenState extends State<EditorScreen> {
       selection: TextSelection.collapsed(offset: newCursorPos),
     );
 
-    setState(() {
-      _editorReadOnly = false;
-    });
+    setState(() => _editorReadOnly = false);
   }
 
-  // ── Tab close ───────────────────────────────────────────────────────────────
+  // ── Tab close ────────────────────────────────────────────────────────────────
 
   Future<void> _handleCloseTab(int index) async {
     if (_closingTab) return;
@@ -133,8 +221,20 @@ class _EditorScreenState extends State<EditorScreen> {
       final tab = _state.tabs[index];
 
       if (tab.isDirty) {
-        final result = await _showDirtyCloseDialog(tab.title);
-        if (result != _DirtyChoice.dontSave) return; // cancel → do nothing
+        final choice = await _showDirtyCloseDialog(tab.title);
+
+        switch (choice) {
+          case _DirtyChoice.cancel:
+            return;
+
+          case _DirtyChoice.save:
+            final saved = await _saveTab(index);
+            // If save failed or the user cancelled Save As, keep the tab open.
+            if (!saved) return;
+
+          case _DirtyChoice.dontSave:
+            break; // fall through and close
+        }
       }
 
       _state.forceCloseTab(index);
@@ -143,49 +243,67 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
+  // ── Dialogs ──────────────────────────────────────────────────────────────────
+
   Future<_DirtyChoice> _showDirtyCloseDialog(String tabTitle) async {
     final choice = await showDialog<_DirtyChoice>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         title: const Text('Unsaved changes'),
-        content: Text(
-          '"$tabTitle" has unsaved changes. Close without saving?',
-        ),
+        content: Text('"$tabTitle" has unsaved changes.'),
         actions: [
-          // Phase 1: Save is not available yet (no file I/O).
-          // Phase 2 will add a Save button here.
           TextButton(
             onPressed: () => Navigator.pop(ctx, _DirtyChoice.dontSave),
             child: const Text("Don't Save"),
           ),
-          FilledButton(
+          TextButton(
             onPressed: () => Navigator.pop(ctx, _DirtyChoice.cancel),
             child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, _DirtyChoice.save),
+            child: const Text('Save'),
           ),
         ],
       ),
     );
 
-    // If the dialog is dismissed via the back key or barrier, treat as cancel.
     return choice ?? _DirtyChoice.cancel;
   }
 
-  // ── Build ───────────────────────────────────────────────────────────────────
+  Future<void> _showErrorDialog({
+    required String title,
+    required String message,
+  }) =>
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+
+  // ── Build ────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    // Shortcuts + Actions are stable wrappers — they do not need to rebuild
-    // when EditorState changes. Only the Scaffold body reacts to state.
     return Shortcuts(
       shortcuts: const {
-        SingleActivator(LogicalKeyboardKey.keyN, control: true):
-            NewTabIntent(),
-        SingleActivator(LogicalKeyboardKey.keyW, control: true):
-            CloseTabIntent(),
+        SingleActivator(LogicalKeyboardKey.keyN, control: true): NewTabIntent(),
+        SingleActivator(LogicalKeyboardKey.keyW, control: true): CloseTabIntent(),
+        SingleActivator(LogicalKeyboardKey.keyO, control: true): OpenFileIntent(),
+        SingleActivator(LogicalKeyboardKey.keyS, control: true): SaveIntent(),
+        SingleActivator(LogicalKeyboardKey.keyS, control: true, shift: true):
+            SaveAsIntent(),
         SingleActivator(LogicalKeyboardKey.keyK, control: true):
             OpenAiPromptIntent(),
-        // Phase 2 will add: Ctrl+O, Ctrl+S, Ctrl+Shift+S
       },
       child: Actions(
         actions: {
@@ -193,8 +311,16 @@ class _EditorScreenState extends State<EditorScreen> {
             onInvoke: (_) => _state.newTab(),
           ),
           CloseTabIntent: CallbackAction<CloseTabIntent>(
-            // activeTabIndex is read at invocation time, not at build time.
             onInvoke: (_) => _handleCloseTab(_state.activeTabIndex),
+          ),
+          OpenFileIntent: CallbackAction<OpenFileIntent>(
+            onInvoke: (_) => _openFile(),
+          ),
+          SaveIntent: CallbackAction<SaveIntent>(
+            onInvoke: (_) => _saveTab(_state.activeTabIndex),
+          ),
+          SaveAsIntent: CallbackAction<SaveAsIntent>(
+            onInvoke: (_) => _saveTabAs(_state.activeTabIndex),
           ),
           OpenAiPromptIntent: CallbackAction<OpenAiPromptIntent>(
             onInvoke: (_) => _openAiPrompt(),
@@ -203,7 +329,7 @@ class _EditorScreenState extends State<EditorScreen> {
         child: Scaffold(
           body: Column(
             children: [
-              // ── Tab bar ──────────────────────────────────────────────────
+              // Tab bar
               EditorTabBar(
                 tabs: _state.tabs,
                 activeTabIndex: _state.activeTabIndex,
@@ -212,26 +338,17 @@ class _EditorScreenState extends State<EditorScreen> {
                 onNewTab: _state.newTab,
               ),
 
-              // ── AI request progress indicator ────────────────────────────
-              // Shown as a 2-pixel stripe below the tab bar while waiting for
-              // the AI response. Phase 1 stub returns instantly, so this is
-              // barely visible — it's wired correctly for Phase 3+ latency.
-              if (_editorReadOnly)
-                const LinearProgressIndicator(minHeight: 2),
+              // Thin progress stripe during AI request
+              if (_editorReadOnly) const LinearProgressIndicator(minHeight: 2),
 
-              // ── Editor area + AI popup overlay ───────────────────────────
+              // Editor area with AI popup overlay
               Expanded(
                 child: Stack(
                   children: [
-                    // Main text editor — fills the stack.
                     EditorArea(
                       tab: _state.activeTab,
                       readOnly: _editorReadOnly,
                     ),
-
-                    // AI prompt popup — anchored to the top-center of the
-                    // editor area via Align + Padding inside the Stack.
-                    // Visible only while _aiPromptVisible is true.
                     if (_aiPromptVisible)
                       AiPromptPopup(
                         onDismiss: _dismissAiPrompt,
@@ -248,5 +365,5 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 }
 
-// Result of the dirty-close confirmation dialog.
-enum _DirtyChoice { dontSave, cancel }
+// Outcome of the dirty-close confirmation dialog.
+enum _DirtyChoice { save, dontSave, cancel }
