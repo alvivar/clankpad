@@ -67,7 +67,9 @@ Clankpad is a simple desktop app: one window, a tab bar, and a text area. No dis
 ### 2.5 File I/O Edge Cases _(Phase 2)_
 
 **Opening a file already open in another tab:**
-Before opening, scan `tabs` for an existing entry with the same `filePath`. If found, switch to that tab instead of opening a duplicate. Prevents two tabs silently diverging on the same file.
+Before opening, scan `tabs` for an existing entry with the same file. If found, switch to that tab instead of opening a duplicate. Prevents two tabs silently diverging on the same file.
+
+Path comparison must be **normalized**: use `File(path).absolute.path.toLowerCase()` on both sides before comparing. This handles `C:\x\y` vs `c:/x/y` vs relative paths resolving to the same file on Windows.
 
 **Save failure (permissions, locked file, disk full, etc.):**
 Show a modal error dialog with the system error message and an OK button. Do not update `savedContent`, do not clear `isDirty`. The tab stays open and dirty. The user must explicitly acknowledge the failure.
@@ -84,7 +86,7 @@ Clankpad implements a **hot exit**: closing the app never causes data loss.
 - On every meaningful change (text edit, tab open/close, active tab switch), a session save is **scheduled**.
 - Saves are **debounced at 500ms**: a `dart:async` `Timer` is cancelled and restarted on each change. The write only fires 500ms after the last change, so continuous typing never hammers the disk.
 - Saves are **atomic**: the session is written to `session.json.tmp` first, then renamed to `session.json` via `File.rename`. Since rename is atomic on NTFS, a crash mid-write can never corrupt the session file — the previous `session.json` remains intact until the new one is fully written.
-- On **app close**, the pending debounce timer (if any) is cancelled and a **synchronous flush** is performed immediately before exit, guaranteeing no change is ever lost even if the window is closed within the 500ms window.
+- On **app close**, the pending debounce timer (if any) is cancelled and a **synchronous flush** is performed immediately before exit. The Flutter-idiomatic hook for this is `AppLifecycleListener.onExitRequested`: flush the session, then return `AppExitResponse.exit`. Note: force-close (Task Manager, SIGKILL) bypasses this callback — that's acceptable, as the debounced writes already minimize the exposure window.
 - On launch, if `session.json` exists, all tabs are restored: their content, file paths, titles, and which tab was active.
 
 **What gets stored per tab:**
@@ -99,7 +101,12 @@ Clankpad implements a **hot exit**: closing the app never causes data loss.
 
 1. If the `content` key exists in the session entry → set the controller to that text. Use `savedContent` to recompute `isDirty`.
 2. If the `content` key is absent → read from `filePath` on disk. That becomes both the controller text and `savedContent` (clean state).
-3. If `filePath` no longer exists or is unreadable → fall back to stored `content` if the key exists; otherwise open an error placeholder tab with a clear message.
+3. If `filePath` no longer exists or is unreadable → fall back to stored `content` if the key exists; otherwise skip the tab (see missing-file edge cases in §2.5).
+
+**Post-restore fixup (after all tabs are processed):**
+
+1. **Min-1-tab rule:** if all tabs were skipped and the list is empty, create one fresh empty tab.
+2. **Clamp `activeTabIndex`:** set to `min(storedIndex, tabs.length - 1)`. Must run after step 1 so the list is never empty when clamping.
 
 ### 2.7 Inline AI Edit (`Ctrl+K`)
 
@@ -357,6 +364,7 @@ lib/
 ## 7. Development Phases
 
 ### Phase 1 — Core (MVP)
+
 **End state:** a working multi-tab editor. Tabs, typing, dirty indicator, keyboard shortcuts all functional. Work is lost on close — that's expected. Every item here is independently testable.
 
 - [ ] `EditorTab` model with `dispose()` and `isDirty`
@@ -370,23 +378,26 @@ lib/
 - [ ] AI stub: replaces selected text (or full content) with `[AI: <prompt>]` — confirms the full mechanical flow is wired correctly without real AI
 
 ### Phase 2 — File I/O
+
 **End state:** the app is genuinely usable. Open, edit, and save real files. All file-related edge cases handled. A human can do real work and test every file operation.
 
 - [ ] Open file (`Ctrl+O`)
 - [ ] Save (`Ctrl+S`)
 - [ ] Save As (`Ctrl+Shift+S`)
 - [ ] Add Save option to dirty-close dialog
-- [ ] Switch to existing tab if file already open (no duplicates)
+- [ ] Switch to existing tab if file already open (normalize paths: `File(path).absolute.path.toLowerCase()`)
 - [ ] Save failure: modal error dialog, tab stays dirty
 
 ### Phase 3 — Persistence + AI Diff
+
 **End state:** the app never loses work. Close mid-edit, reopen, everything is back. Ctrl+K now shows a reviewable diff instead of a blind replace.
 
-- [ ] Session persistence: debounced write to `session.json` (500ms), atomic via `.tmp` rename, restore on launch, synchronous flush on app close
-- [ ] Restore missing-file edge cases (dirty → restore content + notice; clean → skip + notification)
+- [ ] Session persistence: debounced write to `session.json` (500ms), atomic via `.tmp` rename, restore on launch, synchronous flush via `AppLifecycleListener.onExitRequested`
+- [ ] Restore missing-file edge cases (dirty → restore content + notice; clean → skip + notification; clamp `activeTabIndex`; enforce min-1-tab after filtering)
 - [ ] `Ctrl+K` diff view: old vs new, Accept (`Tab` / `Ctrl+Enter`) or Reject (`Escape`)
 
 ### Phase 4 — Polish
+
 **End state:** the app feels complete and native. Visual refinements and quality-of-life improvements.
 
 - [ ] Window title reflects the active file
