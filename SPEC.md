@@ -137,7 +137,7 @@ A lightweight inline prompt popup, inspired by Cursor's inline edit feature.
 
 ```dart
 class EditorTab {
-  final String id;                        // unique UUID
+  final int id;                           // unique incrementing integer
   String? filePath;                       // null if the file has not been saved yet
   String title;                           // file name or "Untitled N"
   String savedContent;                    // content at last save (to detect changes)
@@ -156,7 +156,8 @@ class EditorTab {
 class EditorState extends ChangeNotifier {
   final List<EditorTab> tabs;
   int activeTabIndex;
-  int _untitledCounter = 0; // ever-incrementing, never reset
+  int _nextTabId = 0;        // ever-incrementing ID for each new tab
+  int _untitledCounter = 0;  // ever-incrementing counter for "Untitled N" titles
 }
 ```
 
@@ -167,17 +168,18 @@ class EditorState extends ChangeNotifier {
 ```json
 {
     "activeTabIndex": 1,
+    "nextTabId": 5,
     "untitledCounter": 4,
     "tabs": [
         {
-            "id": "abc-123",
+            "id": 3,
             "title": "Untitled 3",
             "filePath": null,
             "content": "some unsaved text...",
             "savedContent": ""
         },
         {
-            "id": "def-456",
+            "id": 4,
             "title": "notes.txt",
             "filePath": "C:/Users/user/Documents/notes.txt",
             "content": null,
@@ -196,7 +198,7 @@ class EditorState extends ChangeNotifier {
 
 ### State Management
 
-`provider` with `ChangeNotifier`. Simple, low boilerplate, and sufficient for this app's scale. Riverpod would add unnecessary complexity.
+`ChangeNotifier` + `ListenableBuilder`, both built into Flutter. No external package needed.
 
 ### Keyboard Shortcuts
 
@@ -272,12 +274,21 @@ lib/
 
 ---
 
-## 8. Expected Dependencies
+## 8. Dependencies
 
-| Package            | Purpose                                      |
-| ------------------ | -------------------------------------------- |
-| `provider`         | State management                             |
-| `file_selector`    | Native open/save file dialogs                |
-| `path_provider`    | Locate app data directory for `session.json` |
-| `uuid`             | Generate unique tab IDs                      |
-| `diff_match_patch` | Text diffing for Phase 2 accept/reject view  |
+Only one external package is used. Everything else relies on the Flutter/Dart standard library.
+
+| Package         | Purpose                       | Why not stdlib?                                               |
+| --------------- | ----------------------------- | ------------------------------------------------------------- |
+| `file_selector` | Native open/save file dialogs | Requires OS-level calls (Windows COM API); no built-in Flutter equivalent |
+
+**Stdlib replacements:**
+
+| Need                        | Solution                                                    |
+| --------------------------- | ----------------------------------------------------------- |
+| State management            | `ChangeNotifier` + `ListenableBuilder` (built into Flutter) |
+| Tab IDs                     | Incrementing integer counter (`_nextTabId`)                 |
+| App data directory          | `dart:io` + `Platform.environment['APPDATA']` (Windows)     |
+| Text diffing (Phase 2)      | Simple line-by-line diff with `dart:core`                   |
+| JSON serialization          | `dart:convert`                                              |
+| File read/write             | `dart:io`                                                   |
