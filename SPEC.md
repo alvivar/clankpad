@@ -23,6 +23,7 @@ Clankpad is a simple desktop app: one window, a tab bar, and a text area. No dis
 | `Ctrl+N`         | Creates a new empty tab                                                                                          |
 | Click `+`        | Creates a new empty tab (mouse-friendly alternative to `Ctrl+N`)                                                 |
 | Click on tab     | Switches to that tab                                                                                             |
+| `Ctrl+W`         | Closes the active tab (prompts confirmation if there are unsaved changes)                                        |
 | Click `×` on tab | Closes that tab (prompts confirmation if there are unsaved changes)                                              |
 | Tab title        | Shows the file name; if no file is assigned, shows `Untitled N` with an ever-incrementing counter (never reused) |
 | Dirty indicator  | A dot `●` in the title when there are unsaved changes                                                            |
@@ -34,11 +35,12 @@ Clankpad is a simple desktop app: one window, a tab bar, and a text area. No dis
 **Rule:** If the last tab is closed, the app automatically creates a new empty tab (there is always at least one tab).
 
 **Closing a dirty tab — confirmation dialog:**
-Three options are presented:
 
-- **Save** — saves the file (opens "Save As" if no path) then closes the tab.
-- **Don't Save** — discards changes and closes the tab.
-- **Cancel** — dismisses the dialog, tab remains open.
+- _(Phase 1)_ Two options: **Don't Save** and **Cancel**. File I/O is not available yet, so Save is not offered.
+- _(Phase 2)_ Three options: **Save**, **Don't Save**, **Cancel**.
+  - **Save** — saves the file (opens "Save As" if no path) then closes the tab.
+  - **Don't Save** — discards changes and closes the tab.
+  - **Cancel** — dismisses the dialog, tab remains open.
 
 ### 2.2 Text Area
 
@@ -329,9 +331,9 @@ lib/
 - [ ] `EditorState` with controller listener pattern and untitled counter
 - [ ] UI: scrollable tab bar + text area (vertical scroll, word wrap on)
 - [ ] Create tab (`Ctrl+N` and `+` button)
-- [ ] Close tab (with minimum 1 tab rule)
+- [ ] Close tab (`Ctrl+W` and `×` button, with minimum 1 tab rule)
 - [ ] Unsaved changes indicator (`●`)
-- [ ] Closing dirty tab: Save / Don't Save / Cancel dialog
+- [ ] Closing dirty tab: Don't Save / Cancel dialog (Save added in Phase 2)
 - [ ] `Ctrl+K` popup (top-center overlay, `Enter` submit, `Shift+Enter` newline, `Escape` dismiss)
 - [ ] AI stub: direct replace of selected text (or full content) with placeholder output
 
@@ -340,7 +342,8 @@ lib/
 - [ ] Open file (`Ctrl+O`)
 - [ ] Save (`Ctrl+S`)
 - [ ] Save As (`Ctrl+Shift+S`)
-- [ ] Session persistence: write `session.json` on every change, restore on launch
+- [ ] Add Save option to dirty-close dialog
+- [ ] Session persistence: debounced write to `session.json` (500ms), atomic via `.tmp` rename, restore on launch, synchronous flush on app close
 - [ ] `Ctrl+K` diff view: old vs new, Accept (`Tab` / `Ctrl+Enter`) or Reject (`Escape`)
 
 ### Phase 3 — Polish
