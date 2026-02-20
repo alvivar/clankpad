@@ -32,8 +32,9 @@ class EditorTabBar extends StatelessWidget {
           Expanded(
             child: ScrollConfiguration(
               // Hide the scrollbar — horizontal tab scrolling should feel natural.
-              behavior:
-                  ScrollConfiguration.of(context).copyWith(scrollbars: false),
+              behavior: ScrollConfiguration.of(
+                context,
+              ).copyWith(scrollbars: false),
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
@@ -58,16 +59,18 @@ class EditorTabBar extends StatelessWidget {
             color: colorScheme.outlineVariant,
           ),
 
-          // New tab button
-          SizedBox(
-            width: 36,
-            height: 36,
-            child: IconButton(
-              padding: EdgeInsets.zero,
-              iconSize: 18,
-              icon: Icon(Icons.add, color: colorScheme.onSurfaceVariant),
-              tooltip: 'New tab (Ctrl+N)',
-              onPressed: onNewTab,
+          // New tab button — ExcludeFocus prevents focus theft on click.
+          ExcludeFocus(
+            child: SizedBox(
+              width: 36,
+              height: 36,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                iconSize: 18,
+                icon: Icon(Icons.add, color: colorScheme.onSurfaceVariant),
+                tooltip: 'New tab (Ctrl+N)',
+                onPressed: onNewTab,
+              ),
             ),
           ),
         ],

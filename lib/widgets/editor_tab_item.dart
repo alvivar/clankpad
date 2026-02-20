@@ -26,10 +26,12 @@ class EditorTabItem extends StatelessWidget {
     return ValueListenableBuilder<bool>(
       valueListenable: tab.isDirtyNotifier,
       builder: (context, isDirty, _) {
-        final bgColor =
-            isActive ? colorScheme.surface : colorScheme.surfaceContainerHighest;
-        final fgColor =
-            isActive ? colorScheme.onSurface : colorScheme.onSurfaceVariant;
+        final bgColor = isActive
+            ? colorScheme.surface
+            : colorScheme.surfaceContainerHighest;
+        final fgColor = isActive
+            ? colorScheme.onSurface
+            : colorScheme.onSurfaceVariant;
 
         return GestureDetector(
           onTap: onTap,
@@ -43,10 +45,7 @@ class EditorTabItem extends StatelessWidget {
                   color: isActive ? colorScheme.primary : Colors.transparent,
                   width: 2,
                 ),
-                right: BorderSide(
-                  color: colorScheme.outlineVariant,
-                  width: 1,
-                ),
+                right: BorderSide(color: colorScheme.outlineVariant, width: 1),
               ),
             ),
             child: Row(
@@ -67,23 +66,26 @@ class EditorTabItem extends StatelessWidget {
                   ),
 
                 // Tab title
-                Text(
-                  tab.title,
-                  style: TextStyle(fontSize: 13, color: fgColor),
-                ),
+                Text(tab.title, style: TextStyle(fontSize: 13, color: fgColor)),
 
                 const SizedBox(width: 6),
 
-                // Close button
-                SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    iconSize: 13,
-                    icon: Icon(Icons.close, color: colorScheme.onSurfaceVariant),
-                    tooltip: 'Close tab',
-                    onPressed: onClose,
+                // Close button — ExcludeFocus prevents the IconButton from
+                // stealing focus away from the editor on click.
+                ExcludeFocus(
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: IconButton(
+                      padding: EdgeInsets.zero,
+                      iconSize: 13,
+                      icon: Icon(
+                        Icons.close,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                      tooltip: 'Close tab',
+                      onPressed: onClose,
+                    ),
                   ),
                 ),
               ],

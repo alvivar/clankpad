@@ -43,6 +43,11 @@ class _EditorScreenState extends State<EditorScreen> {
   // Guards against re-entrant close attempts while a dialog is showing.
   bool _closingTab = false;
 
+  // Persistent FocusNode for the editor TextField. Kept alive across tab
+  // switches so that focus can be explicitly restored after popups and diffs
+  // are dismissed (autofocus on the TextField only fires on first insertion).
+  final FocusNode _editorFocusNode = FocusNode();
+
   // ── Convenience ─────────────────────────────────────────────────────────────
 
   EditorState get _state => widget.editorState;
@@ -57,17 +62,34 @@ class _EditorScreenState extends State<EditorScreen> {
     // Show any session-restore notices (missing files, etc.) once the first
     // frame has been drawn so there is a valid BuildContext for the dialog.
     if (_state.startupNotices.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _showStartupNotices());
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _showStartupNotices(),
+      );
     }
   }
 
   @override
   void dispose() {
     _state.removeListener(_onEditorStateChanged);
+    _editorFocusNode.dispose();
     super.dispose();
   }
 
-  void _onEditorStateChanged() => setState(() {});
+  void _onEditorStateChanged() {
+    setState(() {});
+    // Restore focus to the editor after every structural change.
+    // Mouse clicks on tab chips and buttons clear focus from the TextField
+    // (Flutter desktop clears focus on clicks to non-focusable areas).
+    // The post-frame callback ensures _editorFocusNode is settled before
+    // requesting focus. Safe for keyboard shortcuts too: without ValueKey,
+    // _editorFocusNode stays attached to the same element the whole time,
+    // so calling requestFocus on an already-focused node is a no-op.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_aiPromptVisible && !_diffVisible) {
+        _editorFocusNode.requestFocus();
+      }
+    });
+  }
 
   // ── Startup notices ──────────────────────────────────────────────────────────
 
@@ -117,7 +139,10 @@ class _EditorScreenState extends State<EditorScreen> {
       content = await File(absPath).readAsString();
     } catch (e) {
       if (!mounted) return;
-      await _showErrorDialog(title: 'Could not open file', message: e.toString());
+      await _showErrorDialog(
+        title: 'Could not open file',
+        message: e.toString(),
+      );
       return;
     }
 
@@ -139,7 +164,9 @@ class _EditorScreenState extends State<EditorScreen> {
 
   Future<bool> _saveTabAs(int index) async {
     final tab = _state.tabs[index];
-    final location = await getSaveLocation(suggestedName: _suggestedSaveName(tab));
+    final location = await getSaveLocation(
+      suggestedName: _suggestedSaveName(tab),
+    );
     if (location == null) return false;
     return _writeFile(location.path, tab.controller.text, index);
   }
@@ -176,7 +203,12 @@ class _EditorScreenState extends State<EditorScreen> {
     });
   }
 
-  void _dismissAiPrompt() => setState(() => _aiPromptVisible = false);
+  void _dismissAiPrompt() {
+    setState(() => _aiPromptVisible = false);
+    // Return focus to the editor — autofocus won't re-fire because the
+    // TextField is already in the tree with the same ValueKey.
+    _editorFocusNode.requestFocus();
+  }
 
   Future<void> _submitAiPrompt(String prompt) async {
     final sel = _snapshotSelection;
@@ -184,7 +216,8 @@ class _EditorScreenState extends State<EditorScreen> {
 
     setState(() {
       _aiPromptVisible = false;
-      _editorReadOnly = true; // lock editor for the duration of request + diff review
+      _editorReadOnly =
+          true; // lock editor for the duration of request + diff review
     });
 
     final editTarget = sel.isCollapsed ? docText : sel.textInside(docText);
@@ -232,6 +265,7 @@ class _EditorScreenState extends State<EditorScreen> {
       _diffVisible = false;
       _editorReadOnly = false;
     });
+    _editorFocusNode.requestFocus();
   }
 
   void _rejectDiff() {
@@ -240,6 +274,7 @@ class _EditorScreenState extends State<EditorScreen> {
       _diffVisible = false;
       _editorReadOnly = false;
     });
+    _editorFocusNode.requestFocus();
   }
 
   // ── Tab close ────────────────────────────────────────────────────────────────
@@ -303,20 +338,19 @@ class _EditorScreenState extends State<EditorScreen> {
   Future<void> _showErrorDialog({
     required String title,
     required String message,
-  }) =>
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(title),
-          content: Text(message),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('OK'),
-            ),
-          ],
+  }) => showDialog(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(title),
+      content: Text(message),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('OK'),
         ),
-      );
+      ],
+    ),
+  );
 
   // ── Build ────────────────────────────────────────────────────────────────────
 
@@ -325,8 +359,10 @@ class _EditorScreenState extends State<EditorScreen> {
     return Shortcuts(
       shortcuts: const {
         SingleActivator(LogicalKeyboardKey.keyN, control: true): NewTabIntent(),
-        SingleActivator(LogicalKeyboardKey.keyW, control: true): CloseTabIntent(),
-        SingleActivator(LogicalKeyboardKey.keyO, control: true): OpenFileIntent(),
+        SingleActivator(LogicalKeyboardKey.keyW, control: true):
+            CloseTabIntent(),
+        SingleActivator(LogicalKeyboardKey.keyO, control: true):
+            OpenFileIntent(),
         SingleActivator(LogicalKeyboardKey.keyS, control: true): SaveIntent(),
         SingleActivator(LogicalKeyboardKey.keyS, control: true, shift: true):
             SaveAsIntent(),
@@ -377,6 +413,7 @@ class _EditorScreenState extends State<EditorScreen> {
                     EditorArea(
                       tab: _state.activeTab,
                       readOnly: _editorReadOnly,
+                      focusNode: _editorFocusNode,
                     ),
 
                     if (_aiPromptVisible)

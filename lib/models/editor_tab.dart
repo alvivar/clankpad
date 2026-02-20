@@ -12,6 +12,11 @@ class EditorTab {
   // Source of truth for current text in the editor.
   final TextEditingController controller;
 
+  // Preserves scroll position per tab. Passed directly to the TextField so
+  // the same TextField element can be reused across tab switches without
+  // resetting scroll.
+  final ScrollController scrollController;
+
   // Drives only the ● dot in the tab chip. Updated by the controller listener
   // in EditorState — never triggers a full EditorState rebuild.
   final ValueNotifier<bool> isDirtyNotifier;
@@ -23,6 +28,7 @@ class EditorTab {
     this.savedContent = '',
     String initialContent = '',
   })  : controller = TextEditingController(text: initialContent),
+        scrollController = ScrollController(),
         isDirtyNotifier = ValueNotifier<bool>(false);
 
   bool get isDirty => isDirtyNotifier.value;
@@ -30,6 +36,7 @@ class EditorTab {
   // Called by EditorState when this tab is removed from the list.
   void dispose() {
     controller.dispose();
+    scrollController.dispose();
     isDirtyNotifier.dispose();
   }
 }

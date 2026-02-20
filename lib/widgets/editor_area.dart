@@ -5,11 +5,15 @@ import '../models/editor_tab.dart';
 class EditorArea extends StatelessWidget {
   final EditorTab tab;
   final bool readOnly;
+  // Persistent FocusNode supplied by EditorScreen so that focus can be
+  // explicitly restored after popups and diffs are dismissed.
+  final FocusNode? focusNode;
 
   const EditorArea({
     super.key,
     required this.tab,
     this.readOnly = false,
+    this.focusNode,
   });
 
   @override
@@ -19,10 +23,15 @@ class EditorArea extends StatelessWidget {
     return ColoredBox(
       color: colorScheme.surface,
       child: TextField(
-        // Keyed by tab ID so Flutter creates a fresh widget (fresh scroll
-        // position, fresh cursor blink) each time a different tab becomes active.
-        key: ValueKey(tab.id),
+        // No ValueKey — the same TextField element is reused across tab
+        // switches. Only controller and scrollController change, so focus
+        // never leaves the element during a tab switch.
         controller: tab.controller,
+        scrollController: tab.scrollController,
+        focusNode: focusNode,
+        // autofocus fires once when the TextField is first inserted (app
+        // startup). After that, focus is managed explicitly via focusNode.
+        autofocus: true,
         readOnly: readOnly,
 
         // Word wrap on, vertical scroll only (Phase 1 default).
