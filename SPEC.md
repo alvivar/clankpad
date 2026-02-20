@@ -83,9 +83,9 @@ Clankpad implements a **hot exit**: closing the app never causes data loss.
 | Untitled (no file path) | Yes — always | Yes — always |
 
 **Restore logic:**
-1. If `content` is present in the session → set the controller to that text. Use `savedContent` to recompute `isDirty`.
-2. If `content` is absent → read from `filePath` on disk. That becomes both the controller text and `savedContent` (clean state).
-3. If `filePath` no longer exists or is unreadable → fall back to stored `content` if present; otherwise open an error placeholder tab with a clear message.
+1. If the `content` key exists in the session entry → set the controller to that text. Use `savedContent` to recompute `isDirty`.
+2. If the `content` key is absent → read from `filePath` on disk. That becomes both the controller text and `savedContent` (clean state).
+3. If `filePath` no longer exists or is unreadable → fall back to stored `content` if the key exists; otherwise open an error placeholder tab with a clear message.
 
 ### 2.6 Inline AI Edit (`Ctrl+K`)
 
@@ -105,9 +105,11 @@ A lightweight inline prompt popup, inspired by Cursor's inline edit feature.
 - `Escape` dismisses the popup with no action.
 
 **Enter/Shift+Enter — explicit key handling required.** On desktop, `TextField` treats `Enter` as a newline like any other key — it does not submit. The popup must intercept via `Focus.onKeyEvent`:
-- `Enter` (no modifiers) → call submit; mark event as handled.
-- `Shift+Enter` → let the event pass through to `TextField` (inserts newline).
-- All other keys pass through normally.
+- `Enter` (no modifiers) → call submit; mark event as `KeyEventResult.handled`.
+- `Shift+Enter` → return `KeyEventResult.ignored` so the event reaches the `TextField` (inserts newline).
+- `Escape` → dismiss popup; mark event as `KeyEventResult.handled`.
+- **All other key combos involving modifiers** (e.g. `Ctrl+W`, `Ctrl+N`, `Ctrl+K`) → mark as `KeyEventResult.handled` and do nothing. This blocks the root `Shortcuts` layer from firing app-level actions while the popup is open.
+- Plain character keys and navigation keys (arrows, backspace, etc.) → return `KeyEventResult.ignored` so they reach the inner `TextField` normally.
 
 Do not assume `TextField`'s `onSubmitted` will fire on desktop in a multiline field — it won't.
 
@@ -231,9 +233,7 @@ controller.addListener(() {
         {
             "id": 4,
             "title": "notes.txt",
-            "filePath": "C:/Users/user/Documents/notes.txt",
-            "content": null,
-            "savedContent": null
+            "filePath": "C:/Users/user/Documents/notes.txt"
         },
         {
             "id": 5,
@@ -246,9 +246,9 @@ controller.addListener(() {
 }
 ```
 
-- Tab `4` (`notes.txt`) is **clean**: `content` is omitted, disk is re-read on restore.
-- Tab `5` (`draft.txt`) is **dirty**: both `content` (unsaved edits) and `savedContent` (last save snapshot) are stored so the edited state is fully preserved.
-- Tab `3` (`Untitled 3`) has no file path: `content` is always stored.
+- Tab `4` (`notes.txt`) is **clean**: `content` and `savedContent` keys are **omitted entirely** — not stored as `null`. Absence of the key is the signal to re-read from disk on restore.
+- Tab `5` (`draft.txt`) is **dirty**: both `content` (unsaved edits) and `savedContent` (last save snapshot) are present.
+- Tab `3` (`Untitled 3`) has no file path: `content` and `savedContent` are always present.
 - `untitledCounter` and `nextTabId` are persisted so numbers never reset across sessions.
 
 ---
