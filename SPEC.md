@@ -213,6 +213,7 @@ class EditorTab {
   String title;                                    // file name or "Untitled N"
   String savedContent;                             // content at last save (to detect changes)
   final TextEditingController controller;          // source of truth for current text
+  final ScrollController scrollController;         // per-tab scroll position (see §5 Focus Management)
   final ValueNotifier<bool> isDirtyNotifier;       // drives only the ● dot in the tab chip
 
   bool get isDirty => isDirtyNotifier.value;       // convenience getter
@@ -220,6 +221,7 @@ class EditorTab {
   // Called by EditorState when the tab is removed.
   void dispose() {
     controller.dispose();
+    scrollController.dispose();
     isDirtyNotifier.dispose();
   }
 }
@@ -321,19 +323,110 @@ This approach correctly intercepts shortcuts even when a `TextField` is focused,
 ```dart
 Shortcuts(
   shortcuts: {
-    LogicalKeySet(LogicalKeyboardKey.tab):         AcceptDiffIntent(),
-    LogicalKeySet(LogicalKeyboardKey.control,
-                  LogicalKeyboardKey.enter):        AcceptDiffIntent(),
-    LogicalKeySet(LogicalKeyboardKey.escape):       RejectDiffIntent(),
+    SingleActivator(LogicalKeyboardKey.tab):                       AcceptDiffIntent(),
+    SingleActivator(LogicalKeyboardKey.enter, control: true):      AcceptDiffIntent(),
+    SingleActivator(LogicalKeyboardKey.escape):                    RejectDiffIntent(),
   },
   child: Actions(
     actions: { /* AcceptDiffIntent, RejectDiffIntent handlers */ },
-    child: Focus(autofocus: true, child: /* diff UI */),
+    child: Focus(focusNode: focusNode, child: /* diff UI */),
   ),
 )
 ```
 
 Flutter resolves shortcuts from the **focused widget upward**, so the local layer wins over the root layer while the overlay is focused. When the overlay is dismissed, the bindings disappear automatically — no manual enable/disable flags needed.
+
+**Important:** do not use `autofocus: true` on the diff overlay's `Focus` widget. Flutter's `autofocus` only acquires focus when _no other node in the same scope is currently focused_. Because the editor's `_editorFocusNode` is always focused when the diff appears, `autofocus` silently does nothing. Focus must be driven explicitly (see §5 Focus Management).
+
+### Focus Management
+
+Focus in a multi-tab desktop app has several subtle failure modes. This section documents the decisions that make focus work correctly in all cases.
+
+**Rule: the editor `TextField` must always hold focus unless a popup or diff overlay is explicitly active.**
+
+This is what makes keyboard shortcuts work immediately after any tab operation, without requiring the user to click the editor first.
+
+#### No `ValueKey` on the editor `TextField`
+
+The editor `TextField` has no `key:` prop. Flutter therefore reuses the same element across tab switches — only `controller` and `scrollController` change. Since the element never leaves the tree, `_editorFocusNode` is never detached and focus is never lost during tab switches triggered by keyboard shortcuts (`Ctrl+N`, `Ctrl+W`).
+
+Early versions used `key: ValueKey(tab.id)`, which destroyed and recreated the `TextField` on every tab switch. This caused two problems: (a) a detach/reattach cycle on `_editorFocusNode` that raced with the keyboard event system, breaking shortcut focus on the keyboard path; (b) `autofocus: true` only fired on the mouse path (where focus was lost then re-requested), never on the keyboard path (where no focus change occurred).
+
+#### Per-tab `ScrollController`
+
+Because `ValueKey` was removed, Flutter no longer resets the `TextField`'s internal scroll position on tab switch. Each `EditorTab` owns a `ScrollController` that is passed to the `TextField`. Switching tabs swaps the controller, preserving each tab's scroll position independently — the same behaviour as before, without the element recreation.
+
+#### Persistent `FocusNode`s in `EditorScreen`
+
+`EditorScreen` owns two long-lived `FocusNode`s:
+
+| Field | Passed to | Purpose |
+|---|---|---|
+| `_editorFocusNode` | `EditorArea` → `TextField` | Allows explicit focus restoration to the editor after any event that clears focus |
+| `_diffFocusNode` | `AiDiffView` → `Focus` | Allows explicit focus grant to the diff overlay once it is mounted |
+
+Both are created in the field initialiser and disposed in `State.dispose()`.
+
+#### `ExcludeFocus` on tab bar buttons
+
+All `IconButton`s in the tab bar (the `×` close button on each tab and the `+` new-tab button) are wrapped in `ExcludeFocus(excluding: true)`. This prevents the button from acquiring focus when clicked. Without it, clicking any tab bar button would call `requestFocus()` on the button's internal `FocusNode`, moving focus away from the editor.
+
+#### Restoring focus after mouse clicks
+
+On desktop, clicking a non-focusable widget (a `GestureDetector` tab chip, or an `ExcludeFocus`-wrapped button) clears the current focus — Flutter's `FocusManager` removes the current owner without assigning a new one. The editor loses focus even though no new widget claimed it.
+
+`EditorScreen._onEditorStateChanged` (called on every structural `EditorState` change) schedules a post-frame `_editorFocusNode.requestFocus()`:
+
+```dart
+void _onEditorStateChanged() {
+  setState(() {});
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (mounted && !_aiPromptVisible && !_diffVisible) {
+      _editorFocusNode.requestFocus();
+    }
+  });
+}
+```
+
+The post-frame wait ensures the rebuild (which may have mounted a new widget subtree) is fully committed before touching the focus tree. The guard prevents the callback from stealing focus back from an active popup or diff overlay.
+
+On the keyboard-shortcut path, `_editorFocusNode` already holds focus; calling `requestFocus()` on an already-focused node is a no-op in Flutter's `FocusManager` — so there is no double-focus or interference.
+
+#### Restoring focus after popup and diff dismissal
+
+When the AI prompt popup or diff overlay is dismissed, its `Focus` widget is removed from the tree. Flutter does not automatically return focus to the previous owner — it goes nowhere. Both `_dismissAiPrompt` and `_acceptDiff`/`_rejectDiff` explicitly call `_editorFocusNode.requestFocus()` after their `setState`.
+
+#### Granting focus to the diff overlay
+
+`autofocus: true` cannot be used (see above). Instead, `_submitAiPrompt` schedules a post-frame `_diffFocusNode.requestFocus()` after the `setState` that makes the diff visible:
+
+```dart
+setState(() { _diffVisible = true; ... });
+WidgetsBinding.instance.addPostFrameCallback((_) {
+  if (mounted) _diffFocusNode.requestFocus();
+});
+```
+
+The post-frame wait is required because `_diffFocusNode` is not attached to any element until `AiDiffView` mounts in the next build.
+
+#### Cursor visibility after keyboard-shortcut tab switches
+
+`TextEditingController(text: content)` initialises its selection to `TextSelection.collapsed(offset: -1)`. Offset `-1` is a sentinel meaning "no cursor placed yet". `EditableText` corrects this automatically in `_handleFocusChanged(true)` — but that event only fires when focus is _gained_, not when it was already held.
+
+On the keyboard-shortcut path, focus never leaves the editor, so `_handleFocusChanged` never fires for the new controller, and the cursor is not rendered.
+
+All `EditorTab` controllers are therefore initialised with an explicit valid selection:
+
+```dart
+controller = TextEditingController.fromValue(
+  TextEditingValue(
+    text: initialContent,
+    selection: const TextSelection.collapsed(offset: 0),
+  ),
+);
+```
+
+Offset `0` is always valid (start of text) and causes `EditableText` to render the cursor immediately, regardless of whether a focus-change event has fired.
 
 ---
 
@@ -395,6 +488,20 @@ lib/
 - [x] Session persistence: debounced write to `session.json` (500ms), atomic via `.tmp` rename, restore on launch, synchronous flush via `AppLifecycleListener.onExitRequested`
 - [x] Restore missing-file edge cases (dirty → restore content + notice; clean → skip + notification; clamp `activeTabIndex`; enforce min-1-tab after filtering)
 - [x] `Ctrl+K` diff view: old vs new, Accept (`Tab` / `Ctrl+Enter`) or Reject (`Escape`)
+
+### Phase 3.5 — Focus & Input Correctness
+
+**End state:** keyboard shortcuts and the text cursor work correctly in every scenario — after tab switches, after using the mouse, and after accepting or rejecting an AI diff. No clicking required to "re-activate" the editor.
+
+Root causes discovered and resolved (all documented in §5 Focus Management):
+
+- [x] Remove `ValueKey` from the editor `TextField` — prevents the detach/reattach race that broke shortcut focus on the keyboard path
+- [x] Add per-tab `ScrollController` on `EditorTab` — preserves scroll position per tab without `ValueKey`
+- [x] `ExcludeFocus` on all tab bar `IconButton`s — prevents click-based focus theft
+- [x] Post-frame `_editorFocusNode.requestFocus()` in `_onEditorStateChanged` — restores focus after mouse clicks clear it (mouse clicks on non-focusable widgets silently clear focus on desktop)
+- [x] Explicit `_editorFocusNode.requestFocus()` after popup and diff dismissal — Flutter does not automatically return focus when a `Focus` widget leaves the tree
+- [x] Replace `autofocus: true` on the diff overlay with `_diffFocusNode` driven by a post-frame `requestFocus()` — `autofocus` only fires when no sibling is focused; the editor is always focused when the diff appears, so `autofocus` was a silent no-op
+- [x] Initialise all `TextEditingController`s with `TextSelection.collapsed(offset: 0)` — the default offset `-1` sentinel is not rendered as a cursor unless a focus-change event fires, which never happens on the keyboard-shortcut path
 
 ### Phase 4 — Polish
 
