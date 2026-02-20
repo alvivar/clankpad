@@ -44,10 +44,9 @@ Three options are presented:
 
 - Plain text editor (no formatting).
 - Monospaced font.
-- Long lines produce **horizontal scroll** (no word wrap by default).
-- Vertical scroll when content exceeds the screen height.
+- **Word wrap on by default.** Vertical scroll when content exceeds the screen height.
 - The area fills all available space below the tab bar.
-- _(Phase 3)_ `Alt+Z` toggles word wrap on/off.
+- _(Phase 3)_ No-wrap + horizontal scroll mode. Flutter's `TextField` does not support this natively; implementing it may require a dedicated editor package (e.g. `re_editor`). `Alt+Z` will toggle between wrap and no-wrap once implemented.
 
 ### 2.3 Open File _(Phase 2)_
 
@@ -137,7 +136,7 @@ A lightweight inline prompt popup, inspired by Cursor's inline edit feature.
 ```
 
 - **Tab bar:** horizontally scrollable row of tabs with a `+` button at the end.
-- **Text area:** expanded `TextField` or `EditableText`, no borders, comfortable padding, both axes scrollable.
+- **Text area:** expanded `TextField` (multiline, word wrap on), no borders, comfortable padding, vertical scroll only.
 - **AI popup:** rendered via `Overlay`, anchored top-center of the editor area.
 
 ---
@@ -267,7 +266,7 @@ lib/
 
 - [ ] `EditorTab` model with `dispose()` and `isDirty`
 - [ ] `EditorState` with controller listener pattern and untitled counter
-- [ ] UI: scrollable tab bar + text area (horizontal + vertical scroll)
+- [ ] UI: scrollable tab bar + text area (vertical scroll, word wrap on)
 - [ ] Create tab (`Ctrl+N` and `+` button)
 - [ ] Close tab (with minimum 1 tab rule)
 - [ ] Unsaved changes indicator (`●`)
@@ -286,7 +285,7 @@ lib/
 ### Phase 3 — Polish
 
 - [ ] Window title reflects the active file
-- [ ] `Alt+Z` toggles word wrap
+- [ ] No-wrap + horizontal scroll mode with `Alt+Z` toggle (evaluate dedicated editor package e.g. `re_editor`)
 - [ ] Native app menu (File menu on Windows/macOS)
 - [ ] Font size adjustment
 - [ ] Light / dark theme
