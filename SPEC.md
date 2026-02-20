@@ -48,7 +48,7 @@ Clankpad is a simple desktop app: one window, a tab bar, and a text area. No dis
 - Monospaced font.
 - **Word wrap on by default.** Vertical scroll when content exceeds the screen height.
 - The area fills all available space below the tab bar.
-- _(Phase 3)_ No-wrap + horizontal scroll mode. Flutter's `TextField` does not support this natively; implementing it may require a dedicated editor package (e.g. `re_editor`). `Alt+Z` will toggle between wrap and no-wrap once implemented.
+- _(Phase 4)_ No-wrap + horizontal scroll mode. Flutter's `TextField` does not support this natively; implementing it may require a dedicated editor package (e.g. `re_editor`). `Alt+Z` will toggle between wrap and no-wrap once implemented.
 
 ### 2.3 Open File _(Phase 2)_
 
@@ -77,7 +77,7 @@ Show a modal error dialog with the system error message and an OK button. Do not
 - **Tab was dirty (content stored in session):** Restore the content into the controller, keep `filePath` set (so the user knows where it was), mark the tab dirty. Show a one-time startup notice: _"⚠ [filename] not found at its original path — content restored from last session."_ The user can save it to a new location via Save As.
 - **Tab was clean (no content stored in session):** Nothing to restore. Skip the tab silently and show a one-time startup notification: _"[filename] could not be restored — file no longer exists."_ Do not open an empty placeholder tab.
 
-### 2.6 Session Persistence _(Phase 2)_
+### 2.6 Session Persistence _(Phase 3)_
 
 Clankpad implements a **hot exit**: closing the app never causes data loss.
 
@@ -123,10 +123,25 @@ A lightweight inline prompt popup, inspired by Cursor's inline edit feature.
 - `Enter` (no modifiers) → call submit; mark event as `KeyEventResult.handled`.
 - `Shift+Enter` → return `KeyEventResult.ignored` so the event reaches the `TextField` (inserts newline).
 - `Escape` → dismiss popup; mark event as `KeyEventResult.handled`.
-- **All other key combos involving modifiers** (e.g. `Ctrl+W`, `Ctrl+N`, `Ctrl+K`) → mark as `KeyEventResult.handled` and do nothing. This blocks the root `Shortcuts` layer from firing app-level actions while the popup is open.
-- Plain character keys and navigation keys (arrows, backspace, etc.) → return `KeyEventResult.ignored` so they reach the inner `TextField` normally.
+- All other keys → return `KeyEventResult.ignored` and pass through normally. This keeps `Ctrl+C/V/X/A/Z` fully functional inside the prompt field.
 
 Do not assume `TextField`'s `onSubmitted` will fire on desktop in a multiline field — it won't.
+
+**Blocking app-level shortcuts while the popup is open.** Wrap the popup widget with a local `Shortcuts` that maps only the specific root-registered app combos to `DoNothingAndStopPropagationIntent`. This prevents them from bubbling up to the root layer without interfering with any other key. `Ctrl+C/V/X/A/Z` are handled internally by Flutter's `EditableText` and never reach the root layer regardless — they need no special treatment.
+
+```dart
+Shortcuts(
+  shortcuts: {
+    SingleActivator(LogicalKeyboardKey.keyN, control: true): DoNothingAndStopPropagationIntent(),
+    SingleActivator(LogicalKeyboardKey.keyW, control: true): DoNothingAndStopPropagationIntent(),
+    SingleActivator(LogicalKeyboardKey.keyO, control: true): DoNothingAndStopPropagationIntent(),
+    SingleActivator(LogicalKeyboardKey.keyS, control: true): DoNothingAndStopPropagationIntent(),
+    SingleActivator(LogicalKeyboardKey.keyS, control: true, shift: true): DoNothingAndStopPropagationIntent(),
+    SingleActivator(LogicalKeyboardKey.keyK, control: true): DoNothingAndStopPropagationIntent(),
+  },
+  child: /* popup card widget */,
+)
+```
 
 **Snapshot on popup open.** When the popup opens, immediately capture and freeze:
 
@@ -147,12 +162,12 @@ These values are passed to the AI request unchanged. They do not update if the u
 
 - The popup closes, then `editTarget` within the document is replaced directly with the AI output using the frozen `selectionRange`. No diff view.
 
-**Result (Phase 2 — diff view):**
+**Result (Phase 3 — diff view):**
 
 - The popup closes, then a diff view appears inline: old text (struck through / red) vs new text (green).
 - The user can **Accept** (`Tab` or `Ctrl+Enter`) or **Reject** (`Escape`) the change.
 
-### 2.8 Menu Bar _(optional / Phase 3)_
+### 2.8 Menu Bar _(optional / Phase 4)_
 
 `File` menu with: New, Open, Save, Save As, Close Tab, Exit.
 
@@ -329,7 +344,7 @@ lib/
     editor_tab_item.dart       # Individual tab chip; uses ValueListenableBuilder on isDirtyNotifier for ●
     editor_area.dart           # Text area (multiline, word wrap on, vertical scroll)
     ai_prompt_popup.dart       # Floating Ctrl+K prompt input (Overlay)
-    ai_diff_view.dart          # Phase 2: inline diff accept/reject overlay
+    ai_diff_view.dart          # Phase 3: inline diff accept/reject overlay
   screens/
     editor_screen.dart         # Main screen: Stack of editor_area + overlays
   services/
@@ -342,6 +357,7 @@ lib/
 ## 7. Development Phases
 
 ### Phase 1 — Core (MVP)
+**End state:** a working multi-tab editor. Tabs, typing, dirty indicator, keyboard shortcuts all functional. Work is lost on close — that's expected. Every item here is independently testable.
 
 - [ ] `EditorTab` model with `dispose()` and `isDirty`
 - [ ] `EditorState` with controller listener pattern and untitled counter
@@ -351,9 +367,10 @@ lib/
 - [ ] Unsaved changes indicator (`●`)
 - [ ] Closing dirty tab: Don't Save / Cancel dialog (Save added in Phase 2)
 - [ ] `Ctrl+K` popup (top-center overlay, `Enter` submit, `Shift+Enter` newline, `Escape` dismiss)
-- [ ] AI stub: direct replace of selected text (or full content) with placeholder output
+- [ ] AI stub: replaces selected text (or full content) with `[AI: <prompt>]` — confirms the full mechanical flow is wired correctly without real AI
 
-### Phase 2 — File I/O + Persistence + AI Diff
+### Phase 2 — File I/O
+**End state:** the app is genuinely usable. Open, edit, and save real files. All file-related edge cases handled. A human can do real work and test every file operation.
 
 - [ ] Open file (`Ctrl+O`)
 - [ ] Save (`Ctrl+S`)
@@ -361,11 +378,16 @@ lib/
 - [ ] Add Save option to dirty-close dialog
 - [ ] Switch to existing tab if file already open (no duplicates)
 - [ ] Save failure: modal error dialog, tab stays dirty
-- [ ] Restore missing-file edge cases (dirty → restore content + notice; clean → skip + notification)
+
+### Phase 3 — Persistence + AI Diff
+**End state:** the app never loses work. Close mid-edit, reopen, everything is back. Ctrl+K now shows a reviewable diff instead of a blind replace.
+
 - [ ] Session persistence: debounced write to `session.json` (500ms), atomic via `.tmp` rename, restore on launch, synchronous flush on app close
+- [ ] Restore missing-file edge cases (dirty → restore content + notice; clean → skip + notification)
 - [ ] `Ctrl+K` diff view: old vs new, Accept (`Tab` / `Ctrl+Enter`) or Reject (`Escape`)
 
-### Phase 3 — Polish
+### Phase 4 — Polish
+**End state:** the app feels complete and native. Visual refinements and quality-of-life improvements.
 
 - [ ] Window title reflects the active file
 - [ ] No-wrap + horizontal scroll mode with `Alt+Z` toggle (evaluate dedicated editor package e.g. `re_editor`)
@@ -391,6 +413,6 @@ Only one external package is used. Everything else relies on the Flutter/Dart st
 | State management       | `ChangeNotifier` + `ListenableBuilder` (built into Flutter) |
 | Tab IDs                | Incrementing integer counter (`_nextTabId`)                 |
 | App data directory     | `dart:io` + `Platform.environment['APPDATA']` (Windows)     |
-| Text diffing (Phase 2) | Simple line-by-line diff with `dart:core`                   |
+| Text diffing (Phase 3) | Simple line-by-line diff with `dart:core`                   |
 | JSON serialization     | `dart:convert`                                              |
 | File read/write        | `dart:io`                                                   |
