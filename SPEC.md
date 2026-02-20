@@ -10,6 +10,7 @@ Clankpad is a simple desktop app: one window, a tab bar, and a text area. No dis
 
 - On launch, one empty tab is ready to type in.
 - The user can create more tabs, write in each one, save, open files, and close tabs.
+- When the app is closed and reopened, all tabs are restored exactly as they were (including unsaved content).
 
 ---
 
@@ -17,65 +18,92 @@ Clankpad is a simple desktop app: one window, a tab bar, and a text area. No dis
 
 ### 2.1 Tabs
 
-| Action           | Description                                                                                                     |
-| ---------------- | --------------------------------------------------------------------------------------------------------------- |
-| `Ctrl+N`         | Creates a new empty tab                                                                                         |
-| Click `+`        | Creates a new empty tab (mouse-friendly alternative to `Ctrl+N`)                                                |
-| Click on tab     | Switches to that tab                                                                                            |
-| Click `×` on tab | Closes that tab (prompts confirmation if there are unsaved changes)                                             |
-| Tab title        | Shows the file name; if no file is assigned, shows `Untitled` with a number (`Untitled 1`, `Untitled 2`, etc.) |
-| Dirty indicator  | A dot `●` in the title when there are unsaved changes                                                           |
+| Action           | Description                                                                                                      |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `Ctrl+N`         | Creates a new empty tab                                                                                          |
+| Click `+`        | Creates a new empty tab (mouse-friendly alternative to `Ctrl+N`)                                                 |
+| Click on tab     | Switches to that tab                                                                                             |
+| Click `×` on tab | Closes that tab (prompts confirmation if there are unsaved changes)                                              |
+| Tab title        | Shows the file name; if no file is assigned, shows `Untitled N` with an ever-incrementing counter (never reused) |
+| Dirty indicator  | A dot `●` in the title when there are unsaved changes                                                            |
+
+**Tab bar overflow:** When tabs exceed the available width, the tab bar scrolls horizontally.
+
+**Untitled counter:** The counter increments globally and is never reused. Closing "Untitled 2" and opening a new tab produces "Untitled 3", not "Untitled 2" again.
 
 **Rule:** If the last tab is closed, the app automatically creates a new empty tab (there is always at least one tab).
+
+**Closing a dirty tab — confirmation dialog:**
+Three options are presented:
+
+- **Save** — saves the file (opens "Save As" if no path) then closes the tab.
+- **Don't Save** — discards changes and closes the tab.
+- **Cancel** — dismisses the dialog, tab remains open.
 
 ### 2.2 Text Area
 
 - Plain text editor (no formatting).
 - Monospaced font.
-- Vertical scroll when content exceeds the screen.
+- Long lines produce **horizontal scroll** (no word wrap by default).
+- Vertical scroll when content exceeds the screen height.
 - The area fills all available space below the tab bar.
+- _(Phase 3)_ `Alt+Z` toggles word wrap on/off.
 
 ### 2.3 Open File _(Phase 2)_
 
-| Action   | Method                                                                                              |
-| -------- | --------------------------------------------------------------------------------------------------- |
-| `Ctrl+O` | Opens the system file picker dialog                                                                 |
+| Action   | Method                                                                                             |
+| -------- | -------------------------------------------------------------------------------------------------- |
+| `Ctrl+O` | Opens the system file picker dialog                                                                |
 | Behavior | If the active tab is empty and clean → load the file there. Otherwise → open the file in a new tab |
 
 ### 2.4 Save File _(Phase 2)_
 
-| Action         | Method                                                       |
-| -------------- | ------------------------------------------------------------ |
+| Action         | Method                                                      |
+| -------------- | ----------------------------------------------------------- |
 | `Ctrl+S`       | Saves the current file. If it has no path → opens "Save As" |
-| `Ctrl+Shift+S` | Always opens "Save As" (allows changing name/location)       |
+| `Ctrl+Shift+S` | Always opens "Save As" (allows changing name/location)      |
 
-### 2.5 Inline AI Edit (`Ctrl+K`)
+### 2.5 Session Persistence _(Phase 2)_
+
+Clankpad implements a **hot exit**: closing the app never causes data loss.
+
+- On every meaningful change (text edit, tab open/close, active tab switch), the session is written to `session.json` in the app's data directory.
+- On launch, if `session.json` exists, all tabs are restored: their content, file paths, titles, and which tab was active.
+- For tabs with a file path: the path is stored; content is re-read from disk on restore (and flagged dirty if it was dirty at close).
+- For unsaved tabs ("Untitled N"): the full content is stored in `session.json` directly.
+
+### 2.6 Inline AI Edit (`Ctrl+K`)
 
 A lightweight inline prompt popup, inspired by Cursor's inline edit feature.
 
 **Trigger:**
+
 - `Ctrl+K` with text selected → opens the popup; the selected text is the **edit target**.
 - `Ctrl+K` with no selection → the entire document content is treated as the edit target (equivalent to selecting all).
 
 **Popup behavior:**
-- A small floating input box appears near the selected text. If there is no selection, the popup appears at the **center of the editor area**.
-- The user types a natural-language prompt (e.g. *"make this more formal"*, *"fix the grammar"*).
+
+- A floating card appears anchored to the **top-center of the editor area** (via `Stack` + `Overlay`), regardless of selection position. This avoids the complexity of computing pixel-level selection coordinates in Flutter.
+- The user types a natural-language prompt (e.g. _"make this more formal"_, _"fix the grammar"_).
 - `Enter` submits the prompt; the popup closes and the result is applied.
 - `Shift+Enter` inserts a newline inside the prompt field.
 - `Escape` dismisses the popup with no action.
 
 **AI context:**
+
 - The AI receives the **full document content** as context so it understands the surrounding text.
 - The edit instruction is applied only to the **selected text** (or the whole document if nothing was selected).
 
 **Result (Phase 1 — simple replace):**
+
 - The popup closes, then the selected text (or full content) is replaced directly with the AI output. No diff view.
 
 **Result (Phase 2 — diff view):**
+
 - The popup closes, then a diff view appears inline: old text (struck through / red) vs new text (green).
 - The user can **Accept** (`Tab` or `Ctrl+Enter`) or **Reject** (`Escape`) the change.
 
-### 2.6 Menu Bar _(optional / phase 2)_
+### 2.7 Menu Bar _(optional / Phase 3)_
 
 `File` menu with: New, Open, Save, Save As, Close Tab, Exit.
 
@@ -85,50 +113,105 @@ A lightweight inline prompt popup, inspired by Cursor's inline edit feature.
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  [Untitled 1 ●] [×]  [notes.txt] [×]  [+]          │  ← Tab bar
+│  [Untitled 1 ●] [×]  [notes.txt] [×]  [+]    ←scroll│  ← Tab bar (scrollable)
 ├─────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────┐    │
+│  │  [Ctrl+K popup — top-center, Phase 1+]      │    │  ← Overlay (when active)
+│  └─────────────────────────────────────────────┘    │
 │                                                     │
-│  (text area — fills the rest of the window)         │
-│                                                     │
+│  (text area — fills the rest of the window,         │
+│   horizontal + vertical scroll)                     │
 │                                                     │
 └─────────────────────────────────────────────────────┘
 ```
 
-- **Tab bar:** horizontal row of tabs with a `+` button at the end to create a new tab.
-- **Text area:** expanded `TextField` or `EditableText`, no borders, comfortable padding.
+- **Tab bar:** horizontally scrollable row of tabs with a `+` button at the end.
+- **Text area:** expanded `TextField` or `EditableText`, no borders, comfortable padding, both axes scrollable.
+- **AI popup:** rendered via `Overlay`, anchored top-center of the editor area.
 
 ---
 
 ## 4. Data Model
 
-Each tab is represented by an `EditorTab` object:
+### EditorTab
 
 ```dart
 class EditorTab {
-  final String id;                    // unique UUID
-  String? filePath;                   // null if the file has not been saved yet
-  String title;                       // file name or "Untitled N"
-  String savedContent;                // content at last save (to detect changes)
-  final TextEditingController controller; // source of truth for current text
+  final String id;                        // unique UUID
+  String? filePath;                       // null if the file has not been saved yet
+  String title;                           // file name or "Untitled N"
+  String savedContent;                    // content at last save (to detect changes)
+  final TextEditingController controller; // single source of truth for current text
 
-  // isDirty compares the controller's live text against the last saved snapshot
   bool get isDirty => controller.text != savedContent;
+
+  // Called by EditorState when the tab is removed.
+  void dispose() => controller.dispose();
 }
 ```
 
-The global app state manages:
-- `List<EditorTab> tabs`
-- `int activeTabIndex`
+### EditorState
+
+```dart
+class EditorState extends ChangeNotifier {
+  final List<EditorTab> tabs;
+  int activeTabIndex;
+  int _untitledCounter = 0; // ever-incrementing, never reset
+}
+```
+
+**Controller listener pattern:** When a tab is created, `EditorState` attaches a listener to its `controller` that calls `notifyListeners()` on every text change. When a tab is closed, the listener is removed and `tab.dispose()` is called. This keeps the dirty indicator reactive and prevents memory leaks.
+
+### Session File (`session.json`)
+
+```json
+{
+    "activeTabIndex": 1,
+    "untitledCounter": 4,
+    "tabs": [
+        {
+            "id": "abc-123",
+            "title": "Untitled 3",
+            "filePath": null,
+            "content": "some unsaved text...",
+            "savedContent": ""
+        },
+        {
+            "id": "def-456",
+            "title": "notes.txt",
+            "filePath": "C:/Users/user/Documents/notes.txt",
+            "content": null,
+            "savedContent": null
+        }
+    ]
+}
+```
+
+- `content: null` means the tab has a file path — content is read from disk on restore.
+- `untitledCounter` is persisted so "Untitled N" numbers never reset across sessions.
 
 ---
 
-## 5. Expected Dependencies
+## 5. Architecture
 
-| Package                          | Purpose                                         |
-| -------------------------------- | ----------------------------------------------- |
-| `file_selector`                  | Native open/save file dialogs                   |
-| `provider` or `flutter_riverpod` | State management                                |
-| `diff_match_patch`               | Text diffing for the Phase 2 accept/reject view |
+### State Management
+
+`provider` with `ChangeNotifier`. Simple, low boilerplate, and sufficient for this app's scale. Riverpod would add unnecessary complexity.
+
+### Keyboard Shortcuts
+
+Flutter's `Shortcuts` + `Actions` widgets, placed at the **app root level** (wrapping the entire widget tree). Each shortcut maps to a typed `Intent` subclass:
+
+```dart
+class NewTabIntent extends Intent {}
+class CloseTabIntent extends Intent {}
+class SaveIntent extends Intent {}
+class SaveAsIntent extends Intent {}
+class OpenFileIntent extends Intent {}
+class OpenAiPromptIntent extends Intent {}
+```
+
+This approach correctly intercepts shortcuts even when a `TextField` is focused, since the `Shortcuts` layer sits above the focused widget in the dispatch chain.
 
 ---
 
@@ -136,21 +219,22 @@ The global app state manages:
 
 ```
 lib/
-  main.dart                  # Entry point, MaterialApp
+  main.dart                    # Entry point, MaterialApp, Shortcuts/Actions root
   models/
-    editor_tab.dart          # EditorTab model
+    editor_tab.dart            # EditorTab model
   state/
-    editor_state.dart        # ChangeNotifier / StateNotifier with tab list
+    editor_state.dart          # EditorState (ChangeNotifier)
   widgets/
-    tab_bar.dart             # Custom tab bar
-    tab_item.dart            # Individual tab (title + close button)
-    editor_area.dart         # Text area
-    ai_prompt_popup.dart     # Floating Ctrl+K prompt input
-    ai_diff_view.dart        # Phase 2: inline diff accept/reject overlay
+    editor_tab_bar.dart        # Horizontally scrollable tab bar
+    editor_tab_item.dart       # Individual tab chip (title + ● + × button)
+    editor_area.dart           # Text area (both-axes scrollable)
+    ai_prompt_popup.dart       # Floating Ctrl+K prompt input (Overlay)
+    ai_diff_view.dart          # Phase 2: inline diff accept/reject overlay
   screens/
-    editor_screen.dart       # Main screen composing everything
+    editor_screen.dart         # Main screen: Stack of editor_area + overlays
   services/
-    ai_service.dart          # AI integration placeholder (Pi via MCP — TBD)
+    session_service.dart       # Read/write session.json
+    ai_service.dart            # AI integration placeholder (Pi via MCP — TBD)
 ```
 
 ---
@@ -159,25 +243,41 @@ lib/
 
 ### Phase 1 — Core (MVP)
 
-- [ ] `EditorTab` model and basic state
-- [ ] UI: tab bar + text area
+- [ ] `EditorTab` model with `dispose()` and `isDirty`
+- [ ] `EditorState` with controller listener pattern and untitled counter
+- [ ] UI: scrollable tab bar + text area (horizontal + vertical scroll)
 - [ ] Create tab (`Ctrl+N` and `+` button)
 - [ ] Close tab (with minimum 1 tab rule)
 - [ ] Unsaved changes indicator (`●`)
-- [ ] `Ctrl+K` popup with prompt input (`Enter` to submit, `Shift+Enter` for newline, `Escape` to dismiss)
-- [ ] AI stub: direct replace of selected text (or full content) with AI output (no diff yet)
+- [ ] Closing dirty tab: Save / Don't Save / Cancel dialog
+- [ ] `Ctrl+K` popup (top-center overlay, `Enter` submit, `Shift+Enter` newline, `Escape` dismiss)
+- [ ] AI stub: direct replace of selected text (or full content) with placeholder output
 
-### Phase 2 — File I/O + AI Diff
+### Phase 2 — File I/O + Persistence + AI Diff
 
 - [ ] Open file (`Ctrl+O`)
 - [ ] Save (`Ctrl+S`)
 - [ ] Save As (`Ctrl+Shift+S`)
-- [ ] Confirmation dialog when closing a dirty tab
-- [ ] `Ctrl+K` diff view: show old vs new text, Accept (`Tab` / `Ctrl+Enter`) or Reject (`Escape`)
+- [ ] Session persistence: write `session.json` on every change, restore on launch
+- [ ] `Ctrl+K` diff view: old vs new, Accept (`Tab` / `Ctrl+Enter`) or Reject (`Escape`)
 
 ### Phase 3 — Polish
 
 - [ ] Window title reflects the active file
+- [ ] `Alt+Z` toggles word wrap
 - [ ] Native app menu (File menu on Windows/macOS)
 - [ ] Font size adjustment
 - [ ] Light / dark theme
+- [ ] True inline `Ctrl+K` popup positioning near the selection (via `RenderEditable`)
+
+---
+
+## 8. Expected Dependencies
+
+| Package            | Purpose                                      |
+| ------------------ | -------------------------------------------- |
+| `provider`         | State management                             |
+| `file_selector`    | Native open/save file dialogs                |
+| `path_provider`    | Locate app data directory for `session.json` |
+| `uuid`             | Generate unique tab IDs                      |
+| `diff_match_patch` | Text diffing for Phase 2 accept/reject view  |
