@@ -69,8 +69,19 @@ Clankpad implements a **hot exit**: closing the app never causes data loss.
 
 - On every meaningful change (text edit, tab open/close, active tab switch), the session is written to `session.json` in the app's data directory.
 - On launch, if `session.json` exists, all tabs are restored: their content, file paths, titles, and which tab was active.
-- For tabs with a file path: the path is stored; content is re-read from disk on restore (and flagged dirty if it was dirty at close).
-- For unsaved tabs ("Untitled N"): the full content is stored in `session.json` directly.
+
+**What gets stored per tab:**
+
+| Tab state | `content` stored? | `savedContent` stored? |
+| --- | --- | --- |
+| File-backed, **clean** | No — re-read from disk on restore | No — disk content becomes baseline |
+| File-backed, **dirty** | Yes — preserves unsaved edits | Yes — needed to correctly recompute `isDirty` on restore |
+| Untitled (no file path) | Yes — always | Yes — always |
+
+**Restore logic:**
+1. If `content` is present in the session → set the controller to that text. Use `savedContent` to recompute `isDirty`.
+2. If `content` is absent → read from `filePath` on disk. That becomes both the controller text and `savedContent` (clean state).
+3. If `filePath` no longer exists or is unreadable → fall back to stored `content` if present; otherwise open an error placeholder tab with a clear message.
 
 ### 2.6 Inline AI Edit (`Ctrl+K`)
 
@@ -167,8 +178,8 @@ class EditorState extends ChangeNotifier {
 
 ```json
 {
-    "activeTabIndex": 1,
-    "nextTabId": 5,
+    "activeTabIndex": 2,
+    "nextTabId": 6,
     "untitledCounter": 4,
     "tabs": [
         {
@@ -184,13 +195,22 @@ class EditorState extends ChangeNotifier {
             "filePath": "C:/Users/user/Documents/notes.txt",
             "content": null,
             "savedContent": null
+        },
+        {
+            "id": 5,
+            "title": "draft.txt",
+            "filePath": "C:/Users/user/Documents/draft.txt",
+            "content": "edited but not yet saved...",
+            "savedContent": "original saved text"
         }
     ]
 }
 ```
 
-- `content: null` means the tab has a file path — content is read from disk on restore.
-- `untitledCounter` is persisted so "Untitled N" numbers never reset across sessions.
+- Tab `4` (`notes.txt`) is **clean**: `content` is omitted, disk is re-read on restore.
+- Tab `5` (`draft.txt`) is **dirty**: both `content` (unsaved edits) and `savedContent` (last save snapshot) are stored so the edited state is fully preserved.
+- Tab `3` (`Untitled 3`) has no file path: `content` is always stored.
+- `untitledCounter` and `nextTabId` are persisted so numbers never reset across sessions.
 
 ---
 
@@ -278,17 +298,17 @@ lib/
 
 Only one external package is used. Everything else relies on the Flutter/Dart standard library.
 
-| Package         | Purpose                       | Why not stdlib?                                               |
-| --------------- | ----------------------------- | ------------------------------------------------------------- |
+| Package         | Purpose                       | Why not stdlib?                                                           |
+| --------------- | ----------------------------- | ------------------------------------------------------------------------- |
 | `file_selector` | Native open/save file dialogs | Requires OS-level calls (Windows COM API); no built-in Flutter equivalent |
 
 **Stdlib replacements:**
 
-| Need                        | Solution                                                    |
-| --------------------------- | ----------------------------------------------------------- |
-| State management            | `ChangeNotifier` + `ListenableBuilder` (built into Flutter) |
-| Tab IDs                     | Incrementing integer counter (`_nextTabId`)                 |
-| App data directory          | `dart:io` + `Platform.environment['APPDATA']` (Windows)     |
-| Text diffing (Phase 2)      | Simple line-by-line diff with `dart:core`                   |
-| JSON serialization          | `dart:convert`                                              |
-| File read/write             | `dart:io`                                                   |
+| Need                   | Solution                                                    |
+| ---------------------- | ----------------------------------------------------------- |
+| State management       | `ChangeNotifier` + `ListenableBuilder` (built into Flutter) |
+| Tab IDs                | Incrementing integer counter (`_nextTabId`)                 |
+| App data directory     | `dart:io` + `Platform.environment['APPDATA']` (Windows)     |
+| Text diffing (Phase 2) | Simple line-by-line diff with `dart:core`                   |
+| JSON serialization     | `dart:convert`                                              |
+| File read/write        | `dart:io`                                                   |
