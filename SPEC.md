@@ -66,7 +66,10 @@ Three options are presented:
 
 Clankpad implements a **hot exit**: closing the app never causes data loss.
 
-- On every meaningful change (text edit, tab open/close, active tab switch), the session is written to `session.json` in the app's data directory.
+- On every meaningful change (text edit, tab open/close, active tab switch), a session save is **scheduled**.
+- Saves are **debounced at 500ms**: a `dart:async` `Timer` is cancelled and restarted on each change. The write only fires 500ms after the last change, so continuous typing never hammers the disk.
+- Saves are **atomic**: the session is written to `session.json.tmp` first, then renamed to `session.json` via `File.rename`. Since rename is atomic on NTFS, a crash mid-write can never corrupt the session file — the previous `session.json` remains intact until the new one is fully written.
+- On **app close**, the pending debounce timer (if any) is cancelled and a **synchronous flush** is performed immediately before exit, guaranteeing no change is ever lost even if the window is closed within the 500ms window.
 - On launch, if `session.json` exists, all tabs are restored: their content, file paths, titles, and which tab was active.
 
 **What gets stored per tab:**
@@ -254,7 +257,7 @@ lib/
   screens/
     editor_screen.dart         # Main screen: Stack of editor_area + overlays
   services/
-    session_service.dart       # Read/write session.json
+    session_service.dart       # Read/write session.json (debounced 500ms, atomic via .tmp rename)
     ai_service.dart            # AI integration placeholder (Pi via MCP — TBD)
 ```
 
