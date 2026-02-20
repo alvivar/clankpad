@@ -252,9 +252,32 @@ class SaveIntent extends Intent {}
 class SaveAsIntent extends Intent {}
 class OpenFileIntent extends Intent {}
 class OpenAiPromptIntent extends Intent {}
+class AcceptDiffIntent extends Intent {}
+class RejectDiffIntent extends Intent {}
 ```
 
 This approach correctly intercepts shortcuts even when a `TextField` is focused, since the `Shortcuts` layer sits above the focused widget in the dispatch chain.
+
+**Rule: never map keys that overlap with standard text-editing shortcuts.** The root layer only registers app-specific combos (`Ctrl+N`, `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+O`, `Ctrl+W`, `Ctrl+K`). Flutter's `EditableText` handles `Ctrl+C/V/X/Z/A` internally — as long as those keys are not registered in the root `Shortcuts` map, they pass through untouched.
+
+**Diff overlay — local `Shortcuts` layer inside the overlay widget.** When the diff view is open, `Tab` must accept the diff rather than traverse focus. The solution is a second `Shortcuts` widget scoped _inside_ `ai_diff_view.dart`, not at the root:
+
+```dart
+Shortcuts(
+  shortcuts: {
+    LogicalKeySet(LogicalKeyboardKey.tab):         AcceptDiffIntent(),
+    LogicalKeySet(LogicalKeyboardKey.control,
+                  LogicalKeyboardKey.enter):        AcceptDiffIntent(),
+    LogicalKeySet(LogicalKeyboardKey.escape):       RejectDiffIntent(),
+  },
+  child: Actions(
+    actions: { /* AcceptDiffIntent, RejectDiffIntent handlers */ },
+    child: Focus(autofocus: true, child: /* diff UI */),
+  ),
+)
+```
+
+Flutter resolves shortcuts from the **focused widget upward**, so the local layer wins over the root layer while the overlay is focused. When the overlay is dismissed, the bindings disappear automatically — no manual enable/disable flags needed.
 
 ---
 
