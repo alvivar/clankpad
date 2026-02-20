@@ -64,7 +64,20 @@ Clankpad is a simple desktop app: one window, a tab bar, and a text area. No dis
 | `Ctrl+S`       | Saves the current file. If it has no path → opens "Save As" |
 | `Ctrl+Shift+S` | Always opens "Save As" (allows changing name/location)      |
 
-### 2.5 Session Persistence _(Phase 2)_
+### 2.5 File I/O Edge Cases _(Phase 2)_
+
+**Opening a file already open in another tab:**
+Before opening, scan `tabs` for an existing entry with the same `filePath`. If found, switch to that tab instead of opening a duplicate. Prevents two tabs silently diverging on the same file.
+
+**Save failure (permissions, locked file, disk full, etc.):**
+Show a modal error dialog with the system error message and an OK button. Do not update `savedContent`, do not clear `isDirty`. The tab stays open and dirty. The user must explicitly acknowledge the failure.
+
+**Restore: session has a `filePath` but the file no longer exists on disk:**
+
+- **Tab was dirty (content stored in session):** Restore the content into the controller, keep `filePath` set (so the user knows where it was), mark the tab dirty. Show a one-time startup notice: *"⚠ [filename] not found at its original path — content restored from last session."* The user can save it to a new location via Save As.
+- **Tab was clean (no content stored in session):** Nothing to restore. Skip the tab silently and show a one-time startup notification: *"[filename] could not be restored — file no longer exists."* Do not open an empty placeholder tab.
+
+### 2.6 Session Persistence _(Phase 2)_
 
 Clankpad implements a **hot exit**: closing the app never causes data loss.
 
@@ -87,7 +100,7 @@ Clankpad implements a **hot exit**: closing the app never causes data loss.
 2. If the `content` key is absent → read from `filePath` on disk. That becomes both the controller text and `savedContent` (clean state).
 3. If `filePath` no longer exists or is unreadable → fall back to stored `content` if the key exists; otherwise open an error placeholder tab with a clear message.
 
-### 2.6 Inline AI Edit (`Ctrl+K`)
+### 2.7 Inline AI Edit (`Ctrl+K`)
 
 A lightweight inline prompt popup, inspired by Cursor's inline edit feature.
 
@@ -136,7 +149,7 @@ These values are passed to the AI request unchanged. They do not update if the u
 - The popup closes, then a diff view appears inline: old text (struck through / red) vs new text (green).
 - The user can **Accept** (`Tab` or `Ctrl+Enter`) or **Reject** (`Escape`) the change.
 
-### 2.7 Menu Bar _(optional / Phase 3)_
+### 2.8 Menu Bar _(optional / Phase 3)_
 
 `File` menu with: New, Open, Save, Save As, Close Tab, Exit.
 
@@ -343,6 +356,9 @@ lib/
 - [ ] Save (`Ctrl+S`)
 - [ ] Save As (`Ctrl+Shift+S`)
 - [ ] Add Save option to dirty-close dialog
+- [ ] Switch to existing tab if file already open (no duplicates)
+- [ ] Save failure: modal error dialog, tab stays dirty
+- [ ] Restore missing-file edge cases (dirty → restore content + notice; clean → skip + notification)
 - [ ] Session persistence: debounced write to `session.json` (500ms), atomic via `.tmp` rename, restore on launch, synchronous flush on app close
 - [ ] `Ctrl+K` diff view: old vs new, Accept (`Tab` / `Ctrl+Enter`) or Reject (`Escape`)
 
