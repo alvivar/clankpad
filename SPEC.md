@@ -150,16 +150,20 @@ A lightweight inline prompt popup, inspired by Cursor's inline edit feature.
 
 ```dart
 class EditorTab {
-  final int id;                           // unique incrementing integer
-  String? filePath;                       // null if the file has not been saved yet
-  String title;                           // file name or "Untitled N"
-  String savedContent;                    // content at last save (to detect changes)
-  final TextEditingController controller; // single source of truth for current text
+  final int id;                                    // unique incrementing integer
+  String? filePath;                                // null if the file has not been saved yet
+  String title;                                    // file name or "Untitled N"
+  String savedContent;                             // content at last save (to detect changes)
+  final TextEditingController controller;          // source of truth for current text
+  final ValueNotifier<bool> isDirtyNotifier;       // drives only the ● dot in the tab chip
 
-  bool get isDirty => controller.text != savedContent;
+  bool get isDirty => isDirtyNotifier.value;       // convenience getter
 
   // Called by EditorState when the tab is removed.
-  void dispose() => controller.dispose();
+  void dispose() {
+    controller.dispose();
+    isDirtyNotifier.dispose();
+  }
 }
 ```
 
@@ -174,7 +178,22 @@ class EditorState extends ChangeNotifier {
 }
 ```
 
-**Controller listener pattern:** When a tab is created, `EditorState` attaches a listener to its `controller` that calls `notifyListeners()` on every text change. When a tab is closed, the listener is removed and `tab.dispose()` is called. This keeps the dirty indicator reactive and prevents memory leaks.
+**Three separate reactive layers — each rebuilds only what it owns:**
+
+| Layer | Type | What listens | Triggered by |
+| --- | --- | --- | --- |
+| Text content | `TextEditingController` | Editor area (directly, no rebuild needed) | Every keystroke |
+| Dirty state | `ValueNotifier<bool>` per tab | That tab's chip only (`ValueListenableBuilder`) | Every keystroke |
+| Structure | `EditorState` (`ChangeNotifier`) | Tab bar layout, screen scaffold | Tab add/close/switch, title/path change |
+
+**Controller listener pattern:** When a tab is created, `EditorState` attaches a listener to its `controller` that updates `isDirtyNotifier` only — it does **not** call `notifyListeners()`. `EditorState.notifyListeners()` is reserved exclusively for structural changes. When a tab is closed, the listener is removed and `tab.dispose()` is called.
+
+```dart
+controller.addListener(() {
+  tab.isDirtyNotifier.value = controller.text != tab.savedContent;
+  // EditorState is not involved — no notifyListeners() here
+});
+```
 
 ### Session File (`session.json`)
 
@@ -250,7 +269,7 @@ lib/
     editor_state.dart          # EditorState (ChangeNotifier)
   widgets/
     editor_tab_bar.dart        # Horizontally scrollable tab bar
-    editor_tab_item.dart       # Individual tab chip (title + ● + × button)
+    editor_tab_item.dart       # Individual tab chip; uses ValueListenableBuilder on isDirtyNotifier for ●
     editor_area.dart           # Text area (both-axes scrollable)
     ai_prompt_popup.dart       # Floating Ctrl+K prompt input (Overlay)
     ai_diff_view.dart          # Phase 2: inline diff accept/reject overlay
