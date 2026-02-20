@@ -367,15 +367,15 @@ lib/
 
 **End state:** a working multi-tab editor. Tabs, typing, dirty indicator, keyboard shortcuts all functional. Work is lost on close — that's expected. Every item here is independently testable.
 
-- [ ] `EditorTab` model with `dispose()` and `isDirty`
-- [ ] `EditorState` with controller listener pattern and untitled counter
-- [ ] UI: scrollable tab bar + text area (vertical scroll, word wrap on)
-- [ ] Create tab (`Ctrl+N` and `+` button)
-- [ ] Close tab (`Ctrl+W` and `×` button, with minimum 1 tab rule)
-- [ ] Unsaved changes indicator (`●`)
-- [ ] Closing dirty tab: Don't Save / Cancel dialog (Save added in Phase 2)
-- [ ] `Ctrl+K` popup (top-center overlay, `Enter` submit, `Shift+Enter` newline, `Escape` dismiss)
-- [ ] AI stub: replaces selected text (or full content) with `[AI: <prompt>]` — confirms the full mechanical flow is wired correctly without real AI
+- [x] `EditorTab` model with `dispose()` and `isDirty`
+- [x] `EditorState` with controller listener pattern and untitled counter
+- [x] UI: scrollable tab bar + text area (vertical scroll, word wrap on)
+- [x] Create tab (`Ctrl+N` and `+` button)
+- [x] Close tab (`Ctrl+W` and `×` button, with minimum 1 tab rule)
+- [x] Unsaved changes indicator (`●`)
+- [x] Closing dirty tab: Don't Save / Cancel dialog (Save added in Phase 2)
+- [x] `Ctrl+K` popup (top-center overlay, `Enter` submit, `Shift+Enter` newline, `Escape` dismiss)
+- [x] AI stub: replaces selected text (or full content) with `[AI: <prompt>]` — confirms the full mechanical flow is wired correctly without real AI
 
 ### Phase 2 — File I/O
 
