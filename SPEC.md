@@ -149,7 +149,7 @@ These values are passed to the AI request unchanged. They do not update if the u
 │  └─────────────────────────────────────────────┘    │
 │                                                     │
 │  (text area — fills the rest of the window,         │
-│   horizontal + vertical scroll)                     │
+│   vertical scroll, word wrap on)                    │
 │                                                     │
 └─────────────────────────────────────────────────────┘
 ```
@@ -309,7 +309,7 @@ lib/
   widgets/
     editor_tab_bar.dart        # Horizontally scrollable tab bar
     editor_tab_item.dart       # Individual tab chip; uses ValueListenableBuilder on isDirtyNotifier for ●
-    editor_area.dart           # Text area (both-axes scrollable)
+    editor_area.dart           # Text area (multiline, word wrap on, vertical scroll)
     ai_prompt_popup.dart       # Floating Ctrl+K prompt input (Overlay)
     ai_diff_view.dart          # Phase 2: inline diff accept/reject overlay
   screens/
