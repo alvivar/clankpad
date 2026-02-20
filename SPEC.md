@@ -392,9 +392,9 @@ lib/
 
 **End state:** the app never loses work. Close mid-edit, reopen, everything is back. Ctrl+K now shows a reviewable diff instead of a blind replace.
 
-- [ ] Session persistence: debounced write to `session.json` (500ms), atomic via `.tmp` rename, restore on launch, synchronous flush via `AppLifecycleListener.onExitRequested`
-- [ ] Restore missing-file edge cases (dirty → restore content + notice; clean → skip + notification; clamp `activeTabIndex`; enforce min-1-tab after filtering)
-- [ ] `Ctrl+K` diff view: old vs new, Accept (`Tab` / `Ctrl+Enter`) or Reject (`Escape`)
+- [x] Session persistence: debounced write to `session.json` (500ms), atomic via `.tmp` rename, restore on launch, synchronous flush via `AppLifecycleListener.onExitRequested`
+- [x] Restore missing-file edge cases (dirty → restore content + notice; clean → skip + notification; clamp `activeTabIndex`; enforce min-1-tab after filtering)
+- [x] `Ctrl+K` diff view: old vs new, Accept (`Tab` / `Ctrl+Enter`) or Reject (`Escape`)
 
 ### Phase 4 — Polish
 

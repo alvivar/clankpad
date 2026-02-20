@@ -8,6 +8,7 @@ import '../models/editor_tab.dart';
 import '../models/intents.dart';
 import '../services/ai_service.dart';
 import '../state/editor_state.dart';
+import '../widgets/ai_diff_view.dart';
 import '../widgets/ai_prompt_popup.dart';
 import '../widgets/editor_area.dart';
 import '../widgets/editor_tab_bar.dart';
@@ -25,11 +26,19 @@ class _EditorScreenState extends State<EditorScreen> {
   // ── Local UI state ──────────────────────────────────────────────────────────
 
   bool _aiPromptVisible = false;
+
+  // True while the AI request is in-flight AND while the diff view is shown.
+  // Keeps the editor readOnly so the snapshot remains valid.
   bool _editorReadOnly = false;
 
-  // Snapshot captured the moment the Ctrl+K popup opens.
+  // Snapshot captured when the Ctrl+K popup opens.
   String _snapshotDocumentText = '';
   TextSelection _snapshotSelection = const TextSelection.collapsed(offset: 0);
+
+  // Diff view state — populated after the AI response arrives.
+  bool _diffVisible = false;
+  String _diffEditTarget = '';
+  String _diffProposed = '';
 
   // Guards against re-entrant close attempts while a dialog is showing.
   bool _closingTab = false;
@@ -44,6 +53,12 @@ class _EditorScreenState extends State<EditorScreen> {
   void initState() {
     super.initState();
     _state.addListener(_onEditorStateChanged);
+
+    // Show any session-restore notices (missing files, etc.) once the first
+    // frame has been drawn so there is a valid BuildContext for the dialog.
+    if (_state.startupNotices.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _showStartupNotices());
+    }
   }
 
   @override
@@ -54,13 +69,23 @@ class _EditorScreenState extends State<EditorScreen> {
 
   void _onEditorStateChanged() => setState(() {});
 
+  // ── Startup notices ──────────────────────────────────────────────────────────
+
+  Future<void> _showStartupNotices() async {
+    final notices = List<String>.from(_state.startupNotices);
+    _state.startupNotices.clear();
+
+    for (final notice in notices) {
+      if (!mounted) return;
+      await _showErrorDialog(title: 'Session Restore', message: notice);
+    }
+  }
+
   // ── File helpers ─────────────────────────────────────────────────────────────
 
-  // Extracts a bare filename from an absolute path, handling both \ and /.
   static String _fileNameFromPath(String path) =>
       path.replaceAll('\\', '/').split('/').last;
 
-  // Returns a sensible default filename for the Save As dialog.
   static String _suggestedSaveName(EditorTab tab) {
     if (tab.filePath != null) return _fileNameFromPath(tab.filePath!);
     final title = tab.title;
@@ -71,14 +96,12 @@ class _EditorScreenState extends State<EditorScreen> {
 
   Future<void> _openFile() async {
     final picked = await openFile();
-    if (picked == null) return; // user cancelled
+    if (picked == null) return;
 
-    // Resolve to an absolute path and normalise for comparison.
     final absPath = File(picked.path).absolute.path;
     final normalised = absPath.toLowerCase();
 
     // Switch to the existing tab if the file is already open.
-    // Uses File(path).absolute.path.toLowerCase() on both sides per the spec.
     final existingIndex = _state.tabs.indexWhere(
       (t) =>
           t.filePath != null &&
@@ -89,16 +112,12 @@ class _EditorScreenState extends State<EditorScreen> {
       return;
     }
 
-    // Read the file content.
     String content;
     try {
       content = await File(absPath).readAsString();
     } catch (e) {
       if (!mounted) return;
-      await _showErrorDialog(
-        title: 'Could not open file',
-        message: e.toString(),
-      );
+      await _showErrorDialog(title: 'Could not open file', message: e.toString());
       return;
     }
 
@@ -107,13 +126,8 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // ── Save / Save As ───────────────────────────────────────────────────────────
 
-  // Saves the tab at [index]. Opens Save As when the tab has no file path.
-  // Returns true if the file was written successfully, false if the user
-  // cancelled Save As or if a write error occurred.
   Future<bool> _saveTab(int index) async {
     final tab = _state.tabs[index];
-
-    // Nothing to do: file-backed tab that is already clean.
     if (tab.filePath != null && !tab.isDirty) return true;
 
     if (tab.filePath != null) {
@@ -123,36 +137,26 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
-  // Opens the Save As dialog and writes the file.
   Future<bool> _saveTabAs(int index) async {
     final tab = _state.tabs[index];
-
     final location = await getSaveLocation(suggestedName: _suggestedSaveName(tab));
-    if (location == null) return false; // user cancelled
-
+    if (location == null) return false;
     return _writeFile(location.path, tab.controller.text, index);
   }
 
-  // Performs the actual file write and updates EditorState on success.
-  // Shows an error dialog on failure and returns false.
   Future<bool> _writeFile(String path, String content, int index) async {
     try {
       await File(path).writeAsString(content);
       _state.onTabSaved(
         index,
         savedContent: content,
-        // Always pass filePath and title so Save As correctly updates both.
         filePath: path,
         title: _fileNameFromPath(path),
       );
       return true;
     } catch (e) {
       if (!mounted) return false;
-      // Do NOT update savedContent or clear isDirty — the tab stays dirty.
-      await _showErrorDialog(
-        title: 'Save failed',
-        message: e.toString(),
-      );
+      await _showErrorDialog(title: 'Save failed', message: e.toString());
       return false;
     }
   }
@@ -160,7 +164,8 @@ class _EditorScreenState extends State<EditorScreen> {
   // ── AI prompt ────────────────────────────────────────────────────────────────
 
   void _openAiPrompt() {
-    if (_aiPromptVisible) return;
+    // Block if another overlay is already active.
+    if (_aiPromptVisible || _diffVisible) return;
 
     final controller = _state.activeTab.controller;
 
@@ -179,7 +184,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
     setState(() {
       _aiPromptVisible = false;
-      _editorReadOnly = true;
+      _editorReadOnly = true; // lock editor for the duration of request + diff review
     });
 
     final editTarget = sel.isCollapsed ? docText : sel.textInside(docText);
@@ -191,6 +196,21 @@ class _EditorScreenState extends State<EditorScreen> {
     );
 
     if (!mounted) return;
+
+    // Show the diff view; keep editor locked until the user decides.
+    setState(() {
+      _diffVisible = true;
+      _diffEditTarget = editTarget;
+      _diffProposed = result;
+    });
+  }
+
+  // ── Diff accept / reject ─────────────────────────────────────────────────────
+
+  void _acceptDiff() {
+    final sel = _snapshotSelection;
+    final docText = _snapshotDocumentText;
+    final result = _diffProposed;
 
     final String newText;
     final int newCursorPos;
@@ -208,7 +228,18 @@ class _EditorScreenState extends State<EditorScreen> {
       selection: TextSelection.collapsed(offset: newCursorPos),
     );
 
-    setState(() => _editorReadOnly = false);
+    setState(() {
+      _diffVisible = false;
+      _editorReadOnly = false;
+    });
+  }
+
+  void _rejectDiff() {
+    // Text is unchanged — no controller update needed.
+    setState(() {
+      _diffVisible = false;
+      _editorReadOnly = false;
+    });
   }
 
   // ── Tab close ────────────────────────────────────────────────────────────────
@@ -226,14 +257,11 @@ class _EditorScreenState extends State<EditorScreen> {
         switch (choice) {
           case _DirtyChoice.cancel:
             return;
-
           case _DirtyChoice.save:
             final saved = await _saveTab(index);
-            // If save failed or the user cancelled Save As, keep the tab open.
-            if (!saved) return;
-
+            if (!saved) return; // save failed or cancelled → keep tab open
           case _DirtyChoice.dontSave:
-            break; // fall through and close
+            break;
         }
       }
 
@@ -338,10 +366,11 @@ class _EditorScreenState extends State<EditorScreen> {
                 onNewTab: _state.newTab,
               ),
 
-              // Thin progress stripe during AI request
-              if (_editorReadOnly) const LinearProgressIndicator(minHeight: 2),
+              // Thin progress stripe: visible while AI request is in-flight.
+              if (_editorReadOnly && !_diffVisible)
+                const LinearProgressIndicator(minHeight: 2),
 
-              // Editor area with AI popup overlay
+              // Editor area + overlays
               Expanded(
                 child: Stack(
                   children: [
@@ -349,10 +378,19 @@ class _EditorScreenState extends State<EditorScreen> {
                       tab: _state.activeTab,
                       readOnly: _editorReadOnly,
                     ),
+
                     if (_aiPromptVisible)
                       AiPromptPopup(
                         onDismiss: _dismissAiPrompt,
                         onSubmit: _submitAiPrompt,
+                      ),
+
+                    if (_diffVisible)
+                      AiDiffView(
+                        editTarget: _diffEditTarget,
+                        proposed: _diffProposed,
+                        onAccept: _acceptDiff,
+                        onReject: _rejectDiff,
                       ),
                   ],
                 ),
@@ -365,5 +403,4 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 }
 
-// Outcome of the dirty-close confirmation dialog.
 enum _DirtyChoice { save, dontSave, cancel }
