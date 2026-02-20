@@ -38,9 +38,9 @@ Clankpad is a simple desktop app: one window, a tab bar, and a text area. No dis
 
 - _(Phase 1)_ Two options: **Don't Save** and **Cancel**. File I/O is not available yet, so Save is not offered.
 - _(Phase 2)_ Three options: **Save**, **Don't Save**, **Cancel**.
-  - **Save** — saves the file (opens "Save As" if no path) then closes the tab.
-  - **Don't Save** — discards changes and closes the tab.
-  - **Cancel** — dismisses the dialog, tab remains open.
+    - **Save** — saves the file (opens "Save As" if no path) then closes the tab.
+    - **Don't Save** — discards changes and closes the tab.
+    - **Cancel** — dismisses the dialog, tab remains open.
 
 ### 2.2 Text Area
 
@@ -74,8 +74,8 @@ Show a modal error dialog with the system error message and an OK button. Do not
 
 **Restore: session has a `filePath` but the file no longer exists on disk:**
 
-- **Tab was dirty (content stored in session):** Restore the content into the controller, keep `filePath` set (so the user knows where it was), mark the tab dirty. Show a one-time startup notice: *"⚠ [filename] not found at its original path — content restored from last session."* The user can save it to a new location via Save As.
-- **Tab was clean (no content stored in session):** Nothing to restore. Skip the tab silently and show a one-time startup notification: *"[filename] could not be restored — file no longer exists."* Do not open an empty placeholder tab.
+- **Tab was dirty (content stored in session):** Restore the content into the controller, keep `filePath` set (so the user knows where it was), mark the tab dirty. Show a one-time startup notice: _"⚠ [filename] not found at its original path — content restored from last session."_ The user can save it to a new location via Save As.
+- **Tab was clean (no content stored in session):** Nothing to restore. Skip the tab silently and show a one-time startup notification: _"[filename] could not be restored — file no longer exists."_ Do not open an empty placeholder tab.
 
 ### 2.6 Session Persistence _(Phase 2)_
 
@@ -89,13 +89,14 @@ Clankpad implements a **hot exit**: closing the app never causes data loss.
 
 **What gets stored per tab:**
 
-| Tab state | `content` stored? | `savedContent` stored? |
-| --- | --- | --- |
-| File-backed, **clean** | No — re-read from disk on restore | No — disk content becomes baseline |
-| File-backed, **dirty** | Yes — preserves unsaved edits | Yes — needed to correctly recompute `isDirty` on restore |
-| Untitled (no file path) | Yes — always | Yes — always |
+| Tab state               | `content` stored?                 | `savedContent` stored?                                   |
+| ----------------------- | --------------------------------- | -------------------------------------------------------- |
+| File-backed, **clean**  | No — re-read from disk on restore | No — disk content becomes baseline                       |
+| File-backed, **dirty**  | Yes — preserves unsaved edits     | Yes — needed to correctly recompute `isDirty` on restore |
+| Untitled (no file path) | Yes — always                      | Yes — always                                             |
 
 **Restore logic:**
+
 1. If the `content` key exists in the session entry → set the controller to that text. Use `savedContent` to recompute `isDirty`.
 2. If the `content` key is absent → read from `filePath` on disk. That becomes both the controller text and `savedContent` (clean state).
 3. If `filePath` no longer exists or is unreadable → fall back to stored `content` if the key exists; otherwise open an error placeholder tab with a clear message.
@@ -118,6 +119,7 @@ A lightweight inline prompt popup, inspired by Cursor's inline edit feature.
 - `Escape` dismisses the popup with no action.
 
 **Enter/Shift+Enter — explicit key handling required.** On desktop, `TextField` treats `Enter` as a newline like any other key — it does not submit. The popup must intercept via `Focus.onKeyEvent`:
+
 - `Enter` (no modifiers) → call submit; mark event as `KeyEventResult.handled`.
 - `Shift+Enter` → return `KeyEventResult.ignored` so the event reaches the `TextField` (inserts newline).
 - `Escape` → dismiss popup; mark event as `KeyEventResult.handled`.
@@ -127,6 +129,7 @@ A lightweight inline prompt popup, inspired by Cursor's inline edit feature.
 Do not assume `TextField`'s `onSubmitted` will fire on desktop in a multiline field — it won't.
 
 **Snapshot on popup open.** When the popup opens, immediately capture and freeze:
+
 - `documentText` — full text of the active tab at that moment.
 - `editTarget` — the selected substring, or full text if nothing is selected.
 - `selectionRange` — the `TextSelection` from the controller.
@@ -213,11 +216,11 @@ class EditorState extends ChangeNotifier {
 
 **Three separate reactive layers — each rebuilds only what it owns:**
 
-| Layer | Type | What listens | Triggered by |
-| --- | --- | --- | --- |
-| Text content | `TextEditingController` | Editor area (directly, no rebuild needed) | Every keystroke |
-| Dirty state | `ValueNotifier<bool>` per tab | That tab's chip only (`ValueListenableBuilder`) | Every keystroke |
-| Structure | `EditorState` (`ChangeNotifier`) | Tab bar layout, screen scaffold | Tab add/close/switch, title/path change |
+| Layer        | Type                             | What listens                                    | Triggered by                            |
+| ------------ | -------------------------------- | ----------------------------------------------- | --------------------------------------- |
+| Text content | `TextEditingController`          | Editor area (directly, no rebuild needed)       | Every keystroke                         |
+| Dirty state  | `ValueNotifier<bool>` per tab    | That tab's chip only (`ValueListenableBuilder`) | Every keystroke                         |
+| Structure    | `EditorState` (`ChangeNotifier`) | Tab bar layout, screen scaffold                 | Tab add/close/switch, title/path change |
 
 **Controller listener pattern:** When a tab is created, `EditorState` attaches a listener to its `controller` that updates `isDirtyNotifier` only — it does **not** call `notifyListeners()`. `EditorState.notifyListeners()` is reserved exclusively for structural changes. When a tab is closed, the listener is removed and `tab.dispose()` is called.
 
