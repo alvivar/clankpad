@@ -18,6 +18,8 @@ class AiDiffView extends StatelessWidget {
   final String proposed;
   final VoidCallback onAccept;
   final VoidCallback onReject;
+  // Owned by EditorScreen so focus can be driven externally.
+  final FocusNode focusNode;
 
   const AiDiffView({
     super.key,
@@ -25,6 +27,7 @@ class AiDiffView extends StatelessWidget {
     required this.proposed,
     required this.onAccept,
     required this.onReject,
+    required this.focusNode,
   });
 
   @override
@@ -64,11 +67,11 @@ class AiDiffView extends StatelessWidget {
             onInvoke: (_) => onReject(),
           ),
         },
-        // autofocus steals focus from the editor TextField as soon as the
-        // diff view appears. Flutter resolves shortcuts from the focused
-        // widget upward, so the local layer wins over the root layer.
+        // Focus is driven externally: EditorScreen calls focusNode.requestFocus()
+        // in a post-frame callback once the diff view is mounted, and returns
+        // focus to _editorFocusNode after accept / reject.
         child: Focus(
-          autofocus: true,
+          focusNode: focusNode,
           child: Align(
             alignment: Alignment.topCenter,
             child: Padding(

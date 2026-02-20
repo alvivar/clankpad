@@ -48,6 +48,11 @@ class _EditorScreenState extends State<EditorScreen> {
   // are dismissed (autofocus on the TextField only fires on first insertion).
   final FocusNode _editorFocusNode = FocusNode();
 
+  // FocusNode for the diff overlay. requestFocus() is called in a post-frame
+  // callback once the overlay is mounted; focus returns to _editorFocusNode
+  // after accept / reject.
+  final FocusNode _diffFocusNode = FocusNode();
+
   // ── Convenience ─────────────────────────────────────────────────────────────
 
   EditorState get _state => widget.editorState;
@@ -72,6 +77,7 @@ class _EditorScreenState extends State<EditorScreen> {
   void dispose() {
     _state.removeListener(_onEditorStateChanged);
     _editorFocusNode.dispose();
+    _diffFocusNode.dispose();
     super.dispose();
   }
 
@@ -235,6 +241,11 @@ class _EditorScreenState extends State<EditorScreen> {
       _diffVisible = true;
       _diffEditTarget = editTarget;
       _diffProposed = result;
+    });
+
+    // Request focus after the frame so _diffFocusNode is mounted first.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _diffFocusNode.requestFocus();
     });
   }
 
@@ -424,6 +435,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
                     if (_diffVisible)
                       AiDiffView(
+                        focusNode: _diffFocusNode,
                         editTarget: _diffEditTarget,
                         proposed: _diffProposed,
                         onAccept: _acceptDiff,
