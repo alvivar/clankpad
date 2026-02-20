@@ -102,14 +102,30 @@ A lightweight inline prompt popup, inspired by Cursor's inline edit feature.
 - `Shift+Enter` inserts a newline inside the prompt field.
 - `Escape` dismisses the popup with no action.
 
+**Enter/Shift+Enter — explicit key handling required.** On desktop, `TextField` treats `Enter` as a newline like any other key — it does not submit. The popup must intercept via `Focus.onKeyEvent`:
+- `Enter` (no modifiers) → call submit; mark event as handled.
+- `Shift+Enter` → let the event pass through to `TextField` (inserts newline).
+- All other keys pass through normally.
+
+Do not assume `TextField`'s `onSubmitted` will fire on desktop in a multiline field — it won't.
+
+**Snapshot on popup open.** When the popup opens, immediately capture and freeze:
+- `documentText` — full text of the active tab at that moment.
+- `editTarget` — the selected substring, or full text if nothing is selected.
+- `selectionRange` — the `TextSelection` from the controller.
+
+These values are passed to the AI request unchanged. They do not update if the user types while the popup is open.
+
 **AI context:**
 
-- The AI receives the **full document content** as context so it understands the surrounding text.
-- The edit instruction is applied only to the **selected text** (or the whole document if nothing was selected).
+- The AI receives `documentText` as context and `editTarget` as the text to transform.
+- The edit instruction is applied only to `editTarget`.
+
+**Editing locked during request.** While the AI request is in-flight, the editor `TextField` is set to `readOnly: true`. A thin linear progress indicator appears below the tab bar. On response (success or error), `readOnly` is restored. Drift detection (applying results against a changed document) is explicitly out of scope — locking is simpler and requests are short.
 
 **Result (Phase 1 — simple replace):**
 
-- The popup closes, then the selected text (or full content) is replaced directly with the AI output. No diff view.
+- The popup closes, then `editTarget` within the document is replaced directly with the AI output using the frozen `selectionRange`. No diff view.
 
 **Result (Phase 2 — diff view):**
 
