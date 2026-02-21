@@ -215,8 +215,10 @@ class _EditorScreenState extends State<EditorScreen> {
 
   void _dismissAiPrompt() {
     setState(() => _aiPromptVisible = false);
-    // Return focus to the editor — autofocus won't re-fire because the
-    // TextField is already in the tree with the same ValueKey.
+    // _editorFocusNode is permanently attached to the TextField (no ValueKey,
+    // no element recreation), so requestFocus() is safe to call synchronously
+    // here — no post-frame callback needed, unlike _onEditorStateChanged where
+    // focus may have been cleared by a pointer event before the rebuild runs.
     _editorFocusNode.requestFocus();
   }
 
@@ -280,6 +282,8 @@ class _EditorScreenState extends State<EditorScreen> {
       _diffVisible = false;
       _editorReadOnly = false;
     });
+    // See _dismissAiPrompt: synchronous requestFocus() is safe here because
+    // _editorFocusNode is always in the tree.
     _editorFocusNode.requestFocus();
   }
 
@@ -289,6 +293,8 @@ class _EditorScreenState extends State<EditorScreen> {
       _diffVisible = false;
       _editorReadOnly = false;
     });
+    // See _dismissAiPrompt: synchronous requestFocus() is safe here because
+    // _editorFocusNode is always in the tree.
     _editorFocusNode.requestFocus();
   }
 
