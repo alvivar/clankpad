@@ -303,7 +303,7 @@ controller.addListener(() {
 
 Flutter's `Shortcuts` + `Actions` widgets, placed at the **`EditorScreen` level** (wrapping the `Scaffold` and everything below it). Each shortcut maps to a typed `Intent` subclass:
 
-> **Why not at the `MaterialApp` root?** `Shortcuts` and `Actions` must stay together in the widget tree. Flutter's dispatch walks *upward* from the focused widget to find `Shortcuts` (maps key → intent), then continues upward to find `Actions` (maps intent → handler). If they were split across a `Navigator` boundary — `Shortcuts` above `MaterialApp`, `Actions` inside `EditorScreen` — a second route's focused widget would find the `Shortcuts` but walk up through a parallel subtree that does not contain `EditorScreen`'s `Actions`, so all shortcuts would silently do nothing. Additionally, all registered shortcuts are editor-specific (`Ctrl+N` creates a tab, etc.); activating them while a hypothetical settings route is active would be semantically wrong. `EditorScreen` scope is correct by design.
+> **Why not at the `MaterialApp` root?** `Shortcuts` and `Actions` must stay together in the widget tree. Flutter's dispatch walks _upward_ from the focused widget to find `Shortcuts` (maps key → intent), then continues upward to find `Actions` (maps intent → handler). If they were split across a `Navigator` boundary — `Shortcuts` above `MaterialApp`, `Actions` inside `EditorScreen` — a second route's focused widget would find the `Shortcuts` but walk up through a parallel subtree that does not contain `EditorScreen`'s `Actions`, so all shortcuts would silently do nothing. Additionally, all registered shortcuts are editor-specific (`Ctrl+N` creates a tab, etc.); activating them while a hypothetical settings route is active would be semantically wrong. `EditorScreen` scope is correct by design.
 
 ```dart
 class NewTabIntent extends Intent {}
@@ -362,10 +362,10 @@ Because `ValueKey` was removed, Flutter no longer resets the `TextField`'s inter
 
 `EditorScreen` owns two long-lived `FocusNode`s:
 
-| Field | Passed to | Purpose |
-|---|---|---|
+| Field              | Passed to                  | Purpose                                                                           |
+| ------------------ | -------------------------- | --------------------------------------------------------------------------------- |
 | `_editorFocusNode` | `EditorArea` → `TextField` | Allows explicit focus restoration to the editor after any event that clears focus |
-| `_diffFocusNode` | `AiDiffView` → `Focus` | Allows explicit focus grant to the diff overlay once it is mounted |
+| `_diffFocusNode`   | `AiDiffView` → `Focus`     | Allows explicit focus grant to the diff overlay once it is mounted                |
 
 Both are created in the field initialiser and disposed in `State.dispose()`.
 
@@ -504,6 +504,30 @@ Root causes discovered and resolved (all documented in §5 Focus Management):
 - [x] Explicit `_editorFocusNode.requestFocus()` after popup and diff dismissal — Flutter does not automatically return focus when a `Focus` widget leaves the tree
 - [x] Replace `autofocus: true` on the diff overlay with `_diffFocusNode` driven by a post-frame `requestFocus()` — `autofocus` only fires when no sibling is focused; the editor is always focused when the diff appears, so `autofocus` was a silent no-op
 - [x] Initialise all `TextEditingController`s with `TextSelection.collapsed(offset: 0)` — the default offset `-1` sentinel is not rendered as a cursor unless a focus-change event fires, which never happens on the keyboard-shortcut path
+
+### Phase 3.6 — Code Review Polish
+
+**End state:** all code-review findings triaged. Changes that improve correctness or clarity are applied; proposals that would regress behaviour or add complexity without benefit are explicitly declined and documented.
+
+#### Applied fixes
+
+- [x] `EditorArea.focusNode` made non-nullable and `required` — the field is load-bearing; the nullable type was misleading and forced a pointless `?` propagation into `TextField`
+- [x] `AiService` moved from inline instantiation (`AiService()` per call) to a persistent `_aiService` field on `_EditorScreenState`; `dispose()` stub added so the teardown hook is wired before real AI integration lands
+- [x] Controller listener `onAnyChange` guard — the listener now calls `onAnyChange` only when `newDirty || changed` (content is dirty, or the dirty flag just flipped). Previously it called unconditionally, causing a redundant second call in `loadFileIntoTab`'s reuse branch where `_structuralChange()` already covered the notification
+- [x] `EditorState.startupNotices` made private (`_startupNotices`); public surface replaced with `bool get hasStartupNotices` and `List<String> takeStartupNotices()` (atomic read-and-clear). `restoreFromSession` changed from `Future<List<String>>` to `Future<void>`, populating `_startupNotices` internally — the two-step assign in `main.dart` is gone
+- [x] `AiDiffView` shortcuts map — `const` moved to the map literal (`const { … }`) rather than individual entries; the `const` context propagates inward so per-entry annotations were redundant noise
+- [x] `_saveTab` flattened to guard clauses — the `else` branch after a returning `if` was removed; three exit paths now read as a flat sequence
+- [x] `SessionService` constructor — `sep` local variable removed; `Platform.pathSeparator` inlined to match `readSession()`'s style
+- [x] `EditorState.tabs` getter changed from `List.unmodifiable(_tabs)` (O(n) element copy on every access) to `UnmodifiableListView(_tabs)` (O(1) wrapper, no copy, reflects live list, still throws on mutation)
+
+#### Declined — design kept, rationale documented in code
+
+- **`dart:ui` import removal** — `AppExitResponse` is defined in `dart:ui` and is _not_ re-exported by `package:flutter/material.dart`; removing the import causes a compile error. Import retained.
+- **`onAnyChange` → `ChangeNotifier.addListener`** — `addListener` only fires when `notifyListeners()` is called, which is restricted to structural changes. Text edits deliberately skip `notifyListeners()` to avoid full UI rebuilds on keystrokes. Migrating session saves to `addListener` would silently drop all keystroke-level persistence. `onAnyChange` is the correct two-channel design; a detailed comment in `EditorState` explains the split.
+- **`_dismissAiPrompt` / `_acceptDiff` / `_rejectDiff` focus inconsistency** — synchronous `requestFocus()` is correct here because `_editorFocusNode` is permanently attached (no `ValueKey`, no element recreation). The post-frame callback in `_onEditorStateChanged` is needed for a different reason: mouse clicks clear focus before the structural change fires. Comments added to each method to prevent future "cleanup" that would introduce a spurious post-frame wait.
+- **`EditorState` constructor creates a tab that is immediately discarded** — a factory constructor cannot be async, so it cannot skip the initial tab when `restoreFromSession` is to be called; any `EditorState.empty()` / `ensureInitialTab()` approach leaks internal invariants into the public API. Cost is three short-lived object allocations at startup. Comment added to the constructor.
+- **`Shortcuts` + `Actions` at app root** — `Shortcuts` and `Actions` must be co-located in the widget tree. Flutter's dispatch walks upward from the focused widget: `Shortcuts` captures the intent, then continues upward to find `Actions`. If split across a `Navigator` boundary, a second route's upward path does not include `EditorScreen`'s `Actions` subtree — all shortcuts would silently fail. Additionally, every registered shortcut is editor-specific; activating them from a hypothetical settings route would be semantically wrong. `EditorScreen` scope is correct by design. Comment added; SPEC §5 updated.
+- **`IntrinsicHeight` in `AiDiffView`** — no `IntrinsicHeight`-free layout simultaneously satisfies all three constraints: card shrinks to content, panes are equal height, each pane scrolls independently when content exceeds the cap. `ConstrainedBox` with a fixed max-height on each pane fails the shrink-wrap requirement (card is always full height for short diffs). Flutter's quadratic-intrinsic-measurement warning targets hot paths (e.g., inside scrolling lists); here it wraps a static ~20-node tree evaluated once per AI response. Comment added explaining the trade-off and pre-empting the `ConstrainedBox` refactor.
 
 ### Phase 4 — Polish
 
