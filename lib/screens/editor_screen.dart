@@ -164,12 +164,8 @@ class _EditorScreenState extends State<EditorScreen> {
   Future<bool> _saveTab(int index) async {
     final tab = _state.tabs[index];
     if (tab.filePath != null && !tab.isDirty) return true;
-
-    if (tab.filePath != null) {
-      return _writeFile(tab.filePath!, tab.controller.text, index);
-    } else {
-      return _saveTabAs(index);
-    }
+    if (tab.filePath != null) return _writeFile(tab.filePath!, tab.controller.text, index);
+    return _saveTabAs(index);
   }
 
   Future<bool> _saveTabAs(int index) async {
