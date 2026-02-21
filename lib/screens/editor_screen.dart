@@ -53,6 +53,10 @@ class _EditorScreenState extends State<EditorScreen> {
   // after accept / reject.
   final FocusNode _diffFocusNode = FocusNode();
 
+  // Kept as a field so it can hold state (HTTP client, API key, etc.) when
+  // real AI integration lands, and is properly disposed with the screen.
+  final _aiService = AiService();
+
   // ── Convenience ─────────────────────────────────────────────────────────────
 
   EditorState get _state => widget.editorState;
@@ -78,6 +82,7 @@ class _EditorScreenState extends State<EditorScreen> {
     _state.removeListener(_onEditorStateChanged);
     _editorFocusNode.dispose();
     _diffFocusNode.dispose();
+    _aiService.dispose();
     super.dispose();
   }
 
@@ -228,7 +233,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
     final editTarget = sel.isCollapsed ? docText : sel.textInside(docText);
 
-    final result = await AiService().getCompletion(
+    final result = await _aiService.getCompletion(
       documentText: docText,
       editTarget: editTarget,
       prompt: prompt,

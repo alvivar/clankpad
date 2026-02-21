@@ -12,4 +12,8 @@ class AiService {
     // Deterministic output makes the flow easy to test manually.
     return '[AI: $prompt]';
   }
+
+  // No-op for now. Will close the HTTP client / cancel in-flight requests
+  // when real AI integration lands.
+  void dispose() {}
 }
