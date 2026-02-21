@@ -63,10 +63,18 @@ class EditorState extends ChangeNotifier {
     );
 
     tab.controller.addListener(() {
-      tab.isDirtyNotifier.value = tab.controller.text != tab.savedContent;
+      final newDirty = tab.controller.text != tab.savedContent;
+      final changed = newDirty != tab.isDirtyNotifier.value;
+      tab.isDirtyNotifier.value = newDirty;
       // Text edits are NOT structural — notifyListeners is not called.
       // Only the tab chip (ValueListenableBuilder on isDirtyNotifier) rebuilds.
-      onAnyChange?.call();
+      //
+      // onAnyChange fires when content is dirty (user is actively editing)
+      // OR when the dirty state just flipped (clean→dirty or dirty→clean).
+      // This suppresses the redundant call in loadFileIntoTab's reuseActive
+      // branch, where controller.text is set to equal savedContent — both
+      // newDirty and changed are false, so only _structuralChange() fires.
+      if (newDirty || changed) onAnyChange?.call();
     });
 
     return tab;
@@ -253,9 +261,7 @@ class EditorState extends ChangeNotifier {
       );
     } catch (_) {
       // File is gone and we have no stored content — skip the tab.
-      notices.add(
-        '"$title" could not be restored — file no longer exists.',
-      );
+      notices.add('"$title" could not be restored — file no longer exists.');
       return null;
     }
   }
