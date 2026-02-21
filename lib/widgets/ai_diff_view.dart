@@ -33,30 +33,26 @@ class AiDiffView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Shortcuts(
-      shortcuts: {
+      shortcuts: const {
         // ── Diff actions ──────────────────────────────────────────────────
-        const SingleActivator(LogicalKeyboardKey.tab): const AcceptDiffIntent(),
-        const SingleActivator(LogicalKeyboardKey.enter, control: true):
-            const AcceptDiffIntent(),
-        const SingleActivator(LogicalKeyboardKey.escape):
-            const RejectDiffIntent(),
+        SingleActivator(LogicalKeyboardKey.tab): AcceptDiffIntent(),
+        SingleActivator(LogicalKeyboardKey.enter, control: true):
+            AcceptDiffIntent(),
+        SingleActivator(LogicalKeyboardKey.escape): RejectDiffIntent(),
 
         // ── Block app-level shortcuts (same list as AiPromptPopup) ────────
-        const SingleActivator(LogicalKeyboardKey.keyN, control: true):
-            const DoNothingAndStopPropagationIntent(),
-        const SingleActivator(LogicalKeyboardKey.keyW, control: true):
-            const DoNothingAndStopPropagationIntent(),
-        const SingleActivator(LogicalKeyboardKey.keyO, control: true):
-            const DoNothingAndStopPropagationIntent(),
-        const SingleActivator(LogicalKeyboardKey.keyS, control: true):
-            const DoNothingAndStopPropagationIntent(),
-        const SingleActivator(
-          LogicalKeyboardKey.keyS,
-          control: true,
-          shift: true,
-        ): const DoNothingAndStopPropagationIntent(),
-        const SingleActivator(LogicalKeyboardKey.keyK, control: true):
-            const DoNothingAndStopPropagationIntent(),
+        SingleActivator(LogicalKeyboardKey.keyN, control: true):
+            DoNothingAndStopPropagationIntent(),
+        SingleActivator(LogicalKeyboardKey.keyW, control: true):
+            DoNothingAndStopPropagationIntent(),
+        SingleActivator(LogicalKeyboardKey.keyO, control: true):
+            DoNothingAndStopPropagationIntent(),
+        SingleActivator(LogicalKeyboardKey.keyS, control: true):
+            DoNothingAndStopPropagationIntent(),
+        SingleActivator(LogicalKeyboardKey.keyS, control: true, shift: true):
+            DoNothingAndStopPropagationIntent(),
+        SingleActivator(LogicalKeyboardKey.keyK, control: true):
+            DoNothingAndStopPropagationIntent(),
       },
       child: Actions(
         actions: {
@@ -149,8 +145,9 @@ class _DiffCard extends StatelessWidget {
                       label: 'Before',
                       text: editTarget,
                       labelColor: colorScheme.error,
-                      backgroundColor: colorScheme.errorContainer
-                          .withValues(alpha: 0.25),
+                      backgroundColor: colorScheme.errorContainer.withValues(
+                        alpha: 0.25,
+                      ),
                     ),
                   ),
                   VerticalDivider(
@@ -163,8 +160,9 @@ class _DiffCard extends StatelessWidget {
                       label: 'After',
                       text: proposed,
                       labelColor: _greenColor(context),
-                      backgroundColor:
-                          _greenColor(context).withValues(alpha: 0.10),
+                      backgroundColor: _greenColor(
+                        context,
+                      ).withValues(alpha: 0.10),
                     ),
                   ),
                 ],
