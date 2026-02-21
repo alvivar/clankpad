@@ -15,9 +15,8 @@ class SessionService {
 
   SessionService(this._state) {
     final dir = sessionDirectory();
-    final sep = Platform.pathSeparator;
-    _sessionFile = File('${dir.path}${sep}session.json');
-    _tmpFile = File('${dir.path}${sep}session.json.tmp');
+    _sessionFile = File('${dir.path}${Platform.pathSeparator}session.json');
+    _tmpFile = File('${dir.path}${Platform.pathSeparator}session.json.tmp');
 
     // Hook into EditorState: every text edit or structural change schedules a
     // debounced write. onAnyChange is null during restore (SessionService is
