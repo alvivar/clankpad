@@ -134,7 +134,25 @@ class _DiffCard extends StatelessWidget {
 
           const Divider(height: 1),
 
-          // Side-by-side before/after panes
+          // Side-by-side before/after panes.
+          //
+          // IntrinsicHeight is used intentionally here. The goal is for both
+          // panes to be the same height and for the card to shrink-wrap its
+          // content up to the 420px cap set by the outer ConstrainedBox.
+          // IntrinsicHeight measures the taller pane's content height, which
+          // is then clamped by Flexible's max constraint; each Expanded _DiffPane
+          // receives that capped height, and SingleChildScrollView inside scrolls
+          // when content exceeds it.
+          //
+          // A ConstrainedBox with a fixed max-height on each pane cannot replicate
+          // this: the card would always be at least that tall, even for a two-line
+          // diff. No IntrinsicHeight-free layout simultaneously content-sizes the
+          // card, equalises pane heights, and enables per-pane scrolling.
+          //
+          // Flutter's quadratic-intrinsic-measurement warning applies to trees
+          // where IntrinsicHeight appears inside a scrolling list or other hot
+          // layout path. Here it wraps a static subtree of ~20 nodes, evaluated
+          // once per AI response — the performance impact is negligible.
           Flexible(
             child: IntrinsicHeight(
               child: Row(
