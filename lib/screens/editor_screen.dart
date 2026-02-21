@@ -373,6 +373,15 @@ class _EditorScreenState extends State<EditorScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Shortcuts + Actions live here at EditorScreen level, not at MaterialApp
+    // root. The two must stay together: Flutter's dispatch walks up from the
+    // focused widget to find Shortcuts (intent), then continues up to find
+    // Actions (handler). Separating them across a Navigator boundary (e.g.,
+    // Shortcuts above MaterialApp, Actions here) breaks the lookup for any
+    // route other than EditorScreen, because the parallel subtrees are not in
+    // the same upward path. All shortcuts here are also editor-specific —
+    // Ctrl+N creating a tab while a settings route is active would be wrong,
+    // so EditorScreen scope is correct by design, not just by convenience.
     return Shortcuts(
       shortcuts: const {
         SingleActivator(LogicalKeyboardKey.keyN, control: true): NewTabIntent(),

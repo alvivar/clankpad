@@ -301,7 +301,9 @@ controller.addListener(() {
 
 ### Keyboard Shortcuts
 
-Flutter's `Shortcuts` + `Actions` widgets, placed at the **app root level** (wrapping the entire widget tree). Each shortcut maps to a typed `Intent` subclass:
+Flutter's `Shortcuts` + `Actions` widgets, placed at the **`EditorScreen` level** (wrapping the `Scaffold` and everything below it). Each shortcut maps to a typed `Intent` subclass:
+
+> **Why not at the `MaterialApp` root?** `Shortcuts` and `Actions` must stay together in the widget tree. Flutter's dispatch walks *upward* from the focused widget to find `Shortcuts` (maps key → intent), then continues upward to find `Actions` (maps intent → handler). If they were split across a `Navigator` boundary — `Shortcuts` above `MaterialApp`, `Actions` inside `EditorScreen` — a second route's focused widget would find the `Shortcuts` but walk up through a parallel subtree that does not contain `EditorScreen`'s `Actions`, so all shortcuts would silently do nothing. Additionally, all registered shortcuts are editor-specific (`Ctrl+N` creates a tab, etc.); activating them while a hypothetical settings route is active would be semantically wrong. `EditorScreen` scope is correct by design.
 
 ```dart
 class NewTabIntent extends Intent {}
