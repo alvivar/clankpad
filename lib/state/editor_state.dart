@@ -27,7 +27,18 @@ class EditorState extends ChangeNotifier {
 
   // Startup notices accumulated during session restore (missing files, etc.).
   // EditorScreen reads and clears these once after the first frame.
-  List<String> startupNotices = [];
+  // Notices collected during session restore (missing files, etc.).
+  // Consumed once by EditorScreen via takeStartupNotices().
+  final List<String> _startupNotices = [];
+
+  bool get hasStartupNotices => _startupNotices.isNotEmpty;
+
+  /// Removes and returns all pending startup notices atomically.
+  List<String> takeStartupNotices() {
+    final result = List<String>.from(_startupNotices);
+    _startupNotices.clear();
+    return result;
+  }
 
   EditorState() {
     _addUntitledTab();
@@ -165,8 +176,9 @@ class EditorState extends ChangeNotifier {
   // Restores editor state from a parsed session.json map.
   // Called once before runApp; onAnyChange is not yet set, so no session
   // writes are triggered during restore.
-  // Returns a list of user-facing notices (missing files, etc.).
-  Future<List<String>> restoreFromSession(Map<String, dynamic> json) async {
+  // User-facing notices (missing files, etc.) are stored internally and
+  // consumed by EditorScreen via takeStartupNotices().
+  Future<void> restoreFromSession(Map<String, dynamic> json) async {
     _nextTabId = (json['nextTabId'] as int?) ?? _nextTabId;
     _untitledCounter = (json['untitledCounter'] as int?) ?? _untitledCounter;
     final storedActiveIndex = (json['activeTabIndex'] as int?) ?? 0;
@@ -197,7 +209,9 @@ class EditorState extends ChangeNotifier {
     // call for completeness in case the restore happens to have listeners.
     notifyListeners();
 
-    return notices;
+    _startupNotices
+      ..clear()
+      ..addAll(notices);
   }
 
   Future<EditorTab?> _restoreTab(

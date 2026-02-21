@@ -14,8 +14,7 @@ Future<void> main() async {
   final editorState = EditorState();
   final sessionJson = SessionService.readSession();
   if (sessionJson != null) {
-    final notices = await editorState.restoreFromSession(sessionJson);
-    editorState.startupNotices = notices;
+    await editorState.restoreFromSession(sessionJson);
   }
 
   runApp(ClankpadApp(editorState: editorState));

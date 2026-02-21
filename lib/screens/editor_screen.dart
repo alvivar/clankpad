@@ -70,7 +70,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
     // Show any session-restore notices (missing files, etc.) once the first
     // frame has been drawn so there is a valid BuildContext for the dialog.
-    if (_state.startupNotices.isNotEmpty) {
+    if (_state.hasStartupNotices) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _showStartupNotices(),
       );
@@ -105,8 +105,7 @@ class _EditorScreenState extends State<EditorScreen> {
   // ── Startup notices ──────────────────────────────────────────────────────────
 
   Future<void> _showStartupNotices() async {
-    final notices = List<String>.from(_state.startupNotices);
-    _state.startupNotices.clear();
+    final notices = _state.takeStartupNotices();
 
     for (final notice in notices) {
       if (!mounted) return;
