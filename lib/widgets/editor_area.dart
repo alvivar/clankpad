@@ -7,13 +7,13 @@ class EditorArea extends StatelessWidget {
   final bool readOnly;
   // Persistent FocusNode supplied by EditorScreen so that focus can be
   // explicitly restored after popups and diffs are dismissed.
-  final FocusNode? focusNode;
+  final FocusNode focusNode;
 
   const EditorArea({
     super.key,
     required this.tab,
+    required this.focusNode,
     this.readOnly = false,
-    this.focusNode,
   });
 
   @override
