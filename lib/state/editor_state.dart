@@ -20,13 +20,15 @@ class EditorState extends ChangeNotifier {
   int get untitledCounter => _untitledCounter;
 
   // Set by SessionService after construction.
-  // Called on every meaningful change — structural OR text edit — so the
-  // service can schedule a debounced write without subscribing to each
-  // individual controller.
+  //
+  // This is intentionally a separate channel from ChangeNotifier.addListener.
+  // notifyListeners() fires only on structural changes (tab add/close/switch,
+  // path/title update) so that UI rebuilds never happen on keystrokes.
+  // onAnyChange fires on structural changes AND text edits, giving the session
+  // service a single hook for debounced writes without calling notifyListeners
+  // on every keystroke or subscribing to every controller individually.
   VoidCallback? onAnyChange;
 
-  // Startup notices accumulated during session restore (missing files, etc.).
-  // EditorScreen reads and clears these once after the first frame.
   // Notices collected during session restore (missing files, etc.).
   // Consumed once by EditorScreen via takeStartupNotices().
   final List<String> _startupNotices = [];
