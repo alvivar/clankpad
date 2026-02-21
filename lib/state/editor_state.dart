@@ -43,6 +43,11 @@ class EditorState extends ChangeNotifier {
   }
 
   EditorState() {
+    // Creates one empty tab so the app is always in a valid state immediately
+    // after construction. If restoreFromSession is called afterwards, it disposes
+    // this tab and replaces it with the persisted session — see the comment
+    // there. The cost (three short-lived objects, two counter increments) is
+    // negligible and keeps the constructor self-contained.
     _addUntitledTab();
   }
 
