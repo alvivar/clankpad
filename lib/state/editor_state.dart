@@ -1,3 +1,4 @@
+import 'dart:collection' show UnmodifiableListView;
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
@@ -11,7 +12,9 @@ class EditorState extends ChangeNotifier {
   int _nextTabId = 0;
   int _untitledCounter = 0;
 
-  List<EditorTab> get tabs => List.unmodifiable(_tabs);
+  // UnmodifiableListView is an O(1) wrapper — no element copy on every access,
+  // unlike List.unmodifiable which copies. Still throws on any mutation attempt.
+  List<EditorTab> get tabs => UnmodifiableListView(_tabs);
   int get activeTabIndex => _activeTabIndex;
   EditorTab get activeTab => _tabs[_activeTabIndex];
 
