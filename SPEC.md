@@ -580,7 +580,12 @@ class PiRpcService {
 
   final String piExecutable; // overridable for non-PATH installs
 
-  /// Spawns Pi, sends the editing prompt, and yields text chunks.
+  Process? _process;             // null → no warm process alive
+  StreamSubscription? _stdoutSub; // persistent; created at spawn, cancelled in dispose
+  StreamController<String>? _lineController; // per-invocation; created on streamEdit entry, closed in finally
+
+  /// Spawns Pi on first call (or after a crash), reuses the warm process
+  /// on subsequent calls. Yields text chunks as they arrive.
   /// Completes normally when agent_end arrives (including after abort).
   /// Throws PiRpcError on process launch failure or final retry failure.
   Stream<String> streamEdit({
@@ -593,7 +598,7 @@ class PiRpcService {
   /// Safe to call when no stream is active — no-op.
   void abort();
 
-  /// Kills the Pi process and closes all streams.
+  /// Cancels the stdout subscription, closes the line controller, kills Pi.
   Future<void> dispose();
 }
 ```
@@ -625,11 +630,18 @@ Instruction: <user's typed instruction>
 IMPORTANT: Reply with ONLY the transformed text. No explanations, no preamble.
 ```
 
-Sent as `{"type": "prompt", "message": "..."}` (no `id` — single prompt per process, no correlation needed).
+Each invocation sends two commands back-to-back (no waiting between them):
+
+```
+{"type": "new_session"}
+{"type": "prompt", "message": "..."}
+```
+
+`new_session` clears Pi's in-memory conversation history before each edit, so invocations are independent. It is a no-op on a fresh process and a reset on a warm one. Because the event loop already ignores non-`prompt` response types with `continue`, the `new_session` acknowledgement passes through without any special handling.
 
 **Handling the `prompt` command response:**
 
-Pi responds with `{"type": "response", "command": "prompt", "success": true/false}` immediately before events start streaming. If `success: false`, treat it as an error and show the error banner. If `success: true`, events follow — no action needed.
+Pi responds with `{"type": "response", "command": "prompt", "success": true/false}` before events start streaming. If `success: false`, throw `PiRpcError`. If `success: true`, events follow — no action needed.
 
 **Text delta extraction:**
 
@@ -644,11 +656,15 @@ if (event['type'] == 'message_update') {
 
 **Abort:**
 
-Sends `{"type": "abort"}` to Pi's stdin. Pi stops mid-stream and emits `agent_end` (or exits cleanly). The stream completes normally — no error banner shown.
+Sends `{"type": "abort"}` to Pi's stdin. Pi stops mid-stream and emits `agent_end`. The stream completes normally — no error banner shown. The process stays warm.
 
 **Process lifecycle:**
 
-Pi is spawned fresh on each `Ctrl+K` invocation. `dispose()` is called when `EditorScreen` disposes, killing any lingering process.
+Pi is spawned on the first `Ctrl+K` and kept alive between invocations. `proc.stdout` is single-subscription, so a persistent `StreamSubscription` (`_stdoutSub`) is created at spawn time and forwards every stdout line to a per-invocation `StreamController<String>` (`_lineController`). `streamEdit` reads from `_lineController.stream`; when `agent_end` arrives, `_lineController` is closed and nulled while `_stdoutSub` stays alive for the next call.
+
+The process is killed only on error paths (`!agentEndReceived`). On success and after abort, the process stays warm. If Pi exits unexpectedly between invocations, `_stdoutSub.onDone` fires: `_process` and `_stdoutSub` are nulled, and `_lineController` is closed if open (which signals an error to any active stream). The next `streamEdit` call sees `_process == null` and spawns fresh.
+
+`dispose()` cancels `_stdoutSub`, closes `_lineController`, and kills `_process`.
 
 **Stderr drain:**
 
@@ -679,21 +695,23 @@ The banner persists until the user clicks `×`. A new error replaces the previou
 
 #### Phase 3.7 task checklist
 
-- [ ] Rename `ai_service.dart` → `pi_rpc_service.dart`; replace `AiService` stub with `PiRpcService`
-- [ ] `PiRpcService(piExecutable)` constructor; `streamEdit` spawns Pi with `runInShell: true`, drains stdout as JSON lines, yields `text_delta` chunks, completes on `agent_end`
-- [ ] `prompt` response check — if `success: false`, throw `PiRpcError` before entering the event loop
-- [ ] `PiRpcService.abort()` — write `{"type":"abort"}` to stdin; no-op if process not running
-- [ ] `PiRpcService.dispose()` — close stdin, kill process
-- [ ] Stderr drain — dedicated listener on `proc.stderr`; discard lines
-- [ ] Process exit without `agent_end` → throw `PiRpcError`
-- [ ] `auto_retry_end (success: false)` → throw `PiRpcError`
-- [ ] `EditorScreen`: replace `_aiService` with `_piRpcService: PiRpcService`
-- [ ] `_submitAiPrompt`: `await for` stream; open diff on first chunk; `try/catch/finally` to set error banner and unlock editor
-- [ ] Cancel button — shown while `_editorReadOnly && !_diffVisible`; calls `abort()` + unlocks editor
-- [ ] `_rejectDiff` calls `_piRpcService.abort()` before `setState` — stops Pi if stream still running
-- [ ] Escape-while-loading guard via `Focus.onKeyEvent` on `EditorScreen` → calls `abort()`
-- [ ] Error banner — inline in `EditorScreen.build`; `String? _errorBanner` field; `×` dismiss button
-- [ ] No new packages — `dart:io Process.start` + `dart:convert` handle everything
+- [x] Rename `ai_service.dart` → `pi_rpc_service.dart`; replace `AiService` stub with `PiRpcService`
+- [x] `PiRpcService(piExecutable)` constructor with `_process`, `_stdoutSub`, `_lineController` fields
+- [x] On `streamEdit`: if `_process == null`, spawn Pi (`runInShell: true`), drain stderr, set up persistent `_stdoutSub` that forwards lines to `_lineController` and nulls itself + process on `onDone`
+- [x] Send `new_session` + `prompt` back-to-back; flush once; create `_lineController` per invocation
+- [x] Event loop reads from `_lineController.stream`; `finally` closes + nulls `_lineController`; kills process only if `!agentEndReceived`
+- [x] `prompt` response check — if `success: false`, throw `PiRpcError`
+- [x] `auto_retry_end (success: false)` → throw `PiRpcError`
+- [x] Process exit without `agent_end` (stdout closes) → `_stdoutSub.onDone` closes `_lineController`; active stream errors; next call spawns fresh
+- [x] `PiRpcService.abort()` — write `{"type":"abort"}` to stdin; no-op if no process
+- [x] `PiRpcService.dispose()` — cancel `_stdoutSub`, close `_lineController`, kill `_process`
+- [x] `EditorScreen`: replace `_aiService` with `_piRpcService: PiRpcService`
+- [x] `_submitAiPrompt`: `await for` stream; open diff on first chunk; `try/catch/finally` to set error banner and unlock editor
+- [x] Cancel button — shown while `_editorReadOnly && !_diffVisible`; calls `abort()` + unlocks editor
+- [x] `_rejectDiff` calls `_piRpcService.abort()` before `setState` — stops Pi if stream still running
+- [x] Escape-while-loading guard via `Focus.onKeyEvent` on `EditorScreen` → calls `abort()`
+- [x] Error banner — inline in `EditorScreen.build`; `String? _errorBanner` field; `×` dismiss button
+- [x] No new packages — `dart:io Process.start` + `dart:convert` handle everything
 
 ---
 

@@ -13,7 +13,9 @@ class PiRpcError implements Exception {
 
 /// Drives Pi's RPC subprocess (`pi --mode rpc`) for AI-assisted text editing.
 ///
-/// One fresh Pi process is spawned per [streamEdit] invocation. Pi owns all
+/// Pi is spawned on the first [streamEdit] call and kept alive between
+/// invocations. Each call sends `new_session` + `prompt` back-to-back to
+/// reset Pi's in-memory conversation history before each edit. Pi owns all
 /// auth and model configuration — Clankpad has no API key management.
 class PiRpcService {
   PiRpcService({this.piExecutable = 'pi'});
@@ -23,9 +25,18 @@ class PiRpcService {
 
   Process? _process;
 
+  // Persistent subscription forwarding stdout lines to the per-invocation
+  // controller. Created at spawn time, cancelled only in dispose() or on error.
+  StreamSubscription<String>? _stdoutSub;
+
+  // Per-invocation sink. Created at the start of streamEdit, closed in finally.
+  // _stdoutSub writes to it; streamEdit reads from it.
+  StreamController<String>? _lineController;
+
   // ── Public API ──────────────────────────────────────────────────────────────
 
-  /// Spawns Pi, sends the editing prompt, and yields text chunks as they arrive.
+  /// Spawns Pi on the first call (or after a crash), reuses the warm process
+  /// on subsequent calls. Yields text chunks as they arrive.
   ///
   /// Completes normally when `agent_end` is received — including after [abort].
   /// Throws [PiRpcError] on process launch failure or unrecoverable model error.
@@ -34,14 +45,127 @@ class PiRpcService {
     required String editTarget,
     required String userInstruction,
   }) async* {
+    // ── Ensure warm process ────────────────────────────────────────────────────
+
+    if (_process == null) {
+      await _spawn(); // throws PiRpcError if pi not found
+    }
+
+    // ── Per-invocation line controller ────────────────────────────────────────
+
+    final controller = StreamController<String>();
+    _lineController = controller;
+
+    // ── Send new_session + prompt (back-to-back, one flush) ──────────────────
+    //
+    // new_session clears Pi's in-memory conversation history so each edit is
+    // independent. Its acknowledgement arrives as type=="response" and is
+    // silently ignored by the event loop below (same as the abort ack).
+
     final message = _buildPromptMessage(
       documentText,
       editTarget,
       userInstruction,
     );
+    _process!.stdin.writeln(jsonEncode({'type': 'new_session'}));
+    _process!.stdin.writeln(jsonEncode({'type': 'prompt', 'message': message}));
+    await _process!.stdin.flush();
 
-    // ── Spawn ─────────────────────────────────────────────────────────────────
+    // ── Stream events ─────────────────────────────────────────────────────────
 
+    bool agentEndReceived = false;
+
+    try {
+      await for (final line in controller.stream) {
+        if (line.trim().isEmpty) continue;
+
+        final Map<String, dynamic> event;
+        try {
+          event = jsonDecode(line) as Map<String, dynamic>;
+        } catch (_) {
+          continue; // skip malformed lines
+        }
+
+        final type = event['type'] as String?;
+
+        // Response acks (new_session, abort, prompt success) arrive here.
+        // Only act on a failing prompt ack; everything else is ignored.
+        if (type == 'response') {
+          if (event['command'] == 'prompt' && event['success'] != true) {
+            throw const PiRpcError(
+              'Pi process exited unexpectedly — try again.',
+            );
+          }
+          continue;
+        }
+
+        // Token chunk
+        if (type == 'message_update') {
+          final ame = event['assistantMessageEvent'] as Map<String, dynamic>?;
+          if (ame?['type'] == 'text_delta') {
+            final chunk = ame!['delta'] as String?;
+            if (chunk != null && chunk.isNotEmpty) {
+              yield chunk;
+            }
+          }
+          continue;
+        }
+
+        // Clean completion — process stays warm
+        if (type == 'agent_end') {
+          agentEndReceived = true;
+          break;
+        }
+
+        // All retries exhausted
+        if (type == 'auto_retry_end' && event['success'] == false) {
+          throw const PiRpcError('Pi process exited unexpectedly — try again.');
+        }
+
+        // All other events (turn_start, message_start, thinking_delta, etc.)
+        // are silently ignored.
+      }
+    } finally {
+      _lineController = null;
+      if (!controller.isClosed) await controller.close();
+      // Kill Pi only on error/unexpected-exit paths. On success and after
+      // abort Pi emits agent_end (agentEndReceived = true) — stay warm.
+      if (!agentEndReceived) {
+        await _killProcess();
+      }
+    }
+
+    if (!agentEndReceived) {
+      throw const PiRpcError('Pi process exited unexpectedly — try again.');
+    }
+  }
+
+  /// Sends `{"type":"abort"}` to Pi's stdin.
+  ///
+  /// Pi stops generation and emits `agent_end`, completing the stream normally.
+  /// The process stays warm. Safe to call when no stream is active — no-op.
+  void abort() {
+    final proc = _process;
+    if (proc == null) return;
+    try {
+      proc.stdin.writeln(jsonEncode({'type': 'abort'}));
+      proc.stdin.flush().ignore();
+    } catch (_) {
+      // stdin may already be closed; nothing to do.
+    }
+  }
+
+  /// Cancels the stdout subscription, closes the line controller, kills Pi.
+  Future<void> dispose() async {
+    final c = _lineController;
+    _lineController = null;
+    if (c != null && !c.isClosed) await c.close();
+    await _killProcess();
+  }
+
+  // ── Internals ───────────────────────────────────────────────────────────────
+
+  Future<void> _spawn() async {
     final Process proc;
     try {
       proc = await Process.start(
@@ -74,100 +198,39 @@ class PiRpcService {
         .transform(const LineSplitter())
         .listen((_) {});
 
-    // ── Send prompt ───────────────────────────────────────────────────────────
-
-    proc.stdin.writeln(jsonEncode({'type': 'prompt', 'message': message}));
-    await proc.stdin.flush();
-
-    // ── Stream events ─────────────────────────────────────────────────────────
-
-    bool agentEndReceived = false;
-
-    try {
-      await for (final line
-          in proc.stdout
-              .transform(utf8.decoder)
-              .transform(const LineSplitter())) {
-        if (line.trim().isEmpty) continue;
-
-        final Map<String, dynamic> event;
-        try {
-          event = jsonDecode(line) as Map<String, dynamic>;
-        } catch (_) {
-          continue; // skip malformed lines
-        }
-
-        final type = event['type'] as String?;
-
-        // prompt command acknowledgement — check before events start flowing
-        if (type == 'response') {
-          if (event['command'] == 'prompt' && event['success'] != true) {
-            throw const PiRpcError(
-              'Pi process exited unexpectedly — try again.',
-            );
-          }
-          continue; // other response types (e.g. abort ack) are ignored
-        }
-
-        // Token chunk
-        if (type == 'message_update') {
-          final ame = event['assistantMessageEvent'] as Map<String, dynamic>?;
-          if (ame?['type'] == 'text_delta') {
-            final chunk = ame!['delta'] as String?;
-            if (chunk != null && chunk.isNotEmpty) {
-              yield chunk;
-            }
-          }
-          continue;
-        }
-
-        // Clean completion
-        if (type == 'agent_end') {
-          agentEndReceived = true;
-          break;
-        }
-
-        // All retries exhausted
-        if (type == 'auto_retry_end' && event['success'] == false) {
-          throw const PiRpcError('Pi process exited unexpectedly — try again.');
-        }
-
-        // All other events (turn_start, message_start, thinking_delta, etc.)
-        // are silently ignored.
-      }
-    } finally {
-      _process = null;
-      // Kill Pi on error/unexpected-exit paths. On a clean abort Pi emits
-      // agent_end before exiting, so agentEndReceived will be true.
-      if (!agentEndReceived) proc.kill();
-    }
-
-    if (!agentEndReceived) {
-      throw const PiRpcError('Pi process exited unexpectedly — try again.');
-    }
+    // Persistent subscription: forwards every stdout line to the active
+    // per-invocation controller. Survives across streamEdit calls.
+    _stdoutSub = proc.stdout
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen(
+          (line) => _lineController?.add(line),
+          onDone: _onProcessExit,
+          onError: (_) => _onProcessExit(),
+        );
   }
 
-  /// Sends `{"type":"abort"}` to Pi's stdin.
-  ///
-  /// Pi stops generation and emits `agent_end`, completing the stream normally.
-  /// Safe to call when no stream is active — does nothing.
-  void abort() {
-    final proc = _process;
-    if (proc == null) return;
-    try {
-      proc.stdin.writeln(jsonEncode({'type': 'abort'}));
-      proc.stdin.flush().ignore();
-    } catch (_) {
-      // stdin may already be closed; nothing to do.
-    }
+  /// Called when Pi's stdout closes — either because Pi exited unexpectedly
+  /// or (if somehow reached) after explicit process termination.
+  void _onProcessExit() {
+    _process = null;
+    _stdoutSub = null;
+    // Close the active controller so the await for in streamEdit exits and
+    // the error path (kill + throw PiRpcError) runs. No-op if already closed
+    // or if called between invocations (controller is null).
+    final c = _lineController;
+    _lineController = null;
+    if (c != null && !c.isClosed) c.close();
   }
 
-  /// Kills the Pi process and marks this service as disposed.
-  /// After [dispose], [streamEdit] returns an empty stream immediately.
-  Future<void> dispose() async {
+  /// Cancels the stdout subscription and kills the process.
+  /// Idempotent — safe to call multiple times.
+  Future<void> _killProcess() async {
     final proc = _process;
     if (proc == null) return;
     _process = null;
+    await _stdoutSub?.cancel();
+    _stdoutSub = null;
     try {
       await proc.stdin.close();
     } catch (_) {}
