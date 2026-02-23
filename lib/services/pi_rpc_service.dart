@@ -229,12 +229,12 @@ class PiRpcService {
     final proc = _process;
     if (proc == null) return;
     _process = null;
+    proc.kill(); // synchronous — Pi is signalled immediately, before any awaits
     await _stdoutSub?.cancel();
     _stdoutSub = null;
     try {
       await proc.stdin.close();
     } catch (_) {}
-    proc.kill();
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
