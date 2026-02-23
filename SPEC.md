@@ -174,9 +174,34 @@ These values are passed to the AI request unchanged. They do not update if the u
 - The popup closes, then a diff view appears inline: old text (struck through / red) vs new text (green).
 - The user can **Accept** (`Tab` or `Ctrl+Enter`) or **Reject** (`Escape`) the change.
 
+**Streaming _(Phase 3.7)_:**
+
+- `AiService` is replaced by `PiRpcService`, which spawns `pi --mode rpc` as a child process and communicates via line-delimited JSON over stdin/stdout (Pi's RPC protocol).
+- `PiRpcService.streamEdit(...)` returns a `Stream<String>` of text chunks — each chunk comes from a `message_update` event with `assistantMessageEvent.type == "text_delta"`.
+- The diff view's "After" pane updates live as chunks arrive — the user sees the response being written in real time.
+- `EditorScreen` accumulates chunks into `_diffProposed` and calls `setState` on each, keeping the diff card reactive with no additional state class.
+- A **Cancel** button (below the tab bar, replacing the progress indicator) aborts the in-flight Pi run at any point by sending `{"type": "abort"}` to Pi's stdin. `Escape` while no popup or diff is visible has the same effect.
+- Errors (Pi not found, Pi process crashed, model error reported by Pi) surface as a dismissable **error banner** below the tab bar rather than a blocking dialog. The editor unlocks immediately so the user is never stuck waiting for a button click to resume.
+
 ### 2.8 Menu Bar _(optional / Phase 4)_
 
 `File` menu with: New, Open, Save, Save As, Close Tab, Exit.
+
+### 2.9 Pi as AI Backend _(Phase 3.7)_
+
+Clankpad delegates all AI calls to **Pi** (`pi --mode rpc`), an external agent process it spawns as a child process. Clankpad never calls any model API directly — Pi owns auth, model selection, retry logic, and streaming.
+
+**Why Pi?**
+
+- Pi already handles auth for every supported provider (Anthropic, OpenAI, Google, etc.) via its own `~/.pi/agent/settings.json` and `/login` OAuth flow. Clankpad inherits all of this for free.
+- Pi's RPC mode exposes a clean line-delimited JSON protocol over stdin/stdout — a natural fit for `dart:io`'s `Process.start`.
+- Swapping the underlying model (e.g. `claude-sonnet-4` → `gpt-4o`) requires no Clankpad code changes — only the Pi spawn arguments change.
+
+**Prerequisites:**
+
+Pi must be installed and configured on the user's machine (`npm install -g @mariozechner/pi-coding-agent`, then `pi /login` or API key set). Clankpad does not manage Pi's configuration. If `pi` is not on `PATH`, a settings field will allow specifying an absolute path.
+
+**No API key in Clankpad.** Auth lives entirely in Pi's config. Clankpad has no `config.json`, no key dialog, no key rotation UI.
 
 ---
 
@@ -451,7 +476,7 @@ lib/
     editor_screen.dart         # Main screen: Stack of editor_area + overlays
   services/
     session_service.dart       # Read/write session.json (debounced 500ms, atomic via .tmp rename)
-    ai_service.dart            # AI integration placeholder (Pi via MCP — TBD)
+    pi_rpc_service.dart        # Phase 3.7: Pi subprocess RPC client — stdin/stdout JSON, text_delta streaming
 ```
 
 ---
@@ -529,6 +554,149 @@ Root causes discovered and resolved (all documented in §5 Focus Management):
 - **`Shortcuts` + `Actions` at app root** — `Shortcuts` and `Actions` must be co-located in the widget tree. Flutter's dispatch walks upward from the focused widget: `Shortcuts` captures the intent, then continues upward to find `Actions`. If split across a `Navigator` boundary, a second route's upward path does not include `EditorScreen`'s `Actions` subtree — all shortcuts would silently fail. Additionally, every registered shortcut is editor-specific; activating them from a hypothetical settings route would be semantically wrong. `EditorScreen` scope is correct by design. Comment added; SPEC §5 updated.
 - **`IntrinsicHeight` in `AiDiffView`** — no `IntrinsicHeight`-free layout simultaneously satisfies all three constraints: card shrinks to content, panes are equal height, each pane scrolls independently when content exceeds the cap. `ConstrainedBox` with a fixed max-height on each pane fails the shrink-wrap requirement (card is always full height for short diffs). Flutter's quadratic-intrinsic-measurement warning targets hot paths (e.g., inside scrolling lists); here it wraps a static ~20-node tree evaluated once per AI response. Comment added explaining the trade-off and pre-empting the `ConstrainedBox` refactor.
 
+### Phase 3.7 — Pi RPC Integration
+
+**End state:** `Ctrl+K` drives a real AI model through Pi's RPC subprocess. Responses stream token-by-token into the live diff view. The user can cancel mid-stream. Pi process errors surface as a non-blocking banner. No API key management lives in Clankpad — Pi owns auth entirely.
+
+#### Protocol recap (from Pi RPC spec)
+
+Pi runs as a child process (see spawn args below). Commands are JSON lines sent to its stdin; events and responses come back as JSON lines on stdout. Stderr must be continuously drained or the child process can block.
+
+The only events Clankpad acts on:
+
+| Event                                      | When                  | What we do                                                          |
+| ------------------------------------------ | --------------------- | ------------------------------------------------------------------- |
+| `message_update` (delta type `text_delta`) | Token arrives         | Append `assistantMessageEvent.delta` to `_diffProposed`; `setState` |
+| `agent_end`                                | Pi finished           | Finalize diff, hide progress indicator                              |
+| `auto_retry_end` (`success: false`)        | All retries exhausted | Show error banner, unlock editor                                    |
+
+Everything else (thinking deltas, tool events, compaction events, etc.) is silently ignored.
+
+#### `PiRpcService` — replaces `AiService`
+
+```dart
+class PiRpcService {
+  PiRpcService({this.piExecutable = 'pi'});
+
+  final String piExecutable; // overridable for non-PATH installs
+
+  /// Spawns Pi, sends the editing prompt, and yields text chunks.
+  /// Completes normally when agent_end arrives (including after abort).
+  /// Throws PiRpcError on process launch failure or final retry failure.
+  Stream<String> streamEdit({
+    required String documentText,
+    required String editTarget,
+    required String userInstruction,
+  });
+
+  /// Sends {"type": "abort"} to Pi's stdin.
+  /// Safe to call when no stream is active — no-op.
+  void abort();
+
+  /// Kills the Pi process and closes all streams.
+  Future<void> dispose();
+}
+```
+
+**Pi spawn args:**
+
+```
+pi --mode rpc --no-session --no-tools
+   --no-extensions --no-skills --no-prompt-templates
+```
+
+`--no-session` — stateless, no session file written.
+`--no-tools` — model can only return text; no file system access.
+`--no-extensions --no-skills --no-prompt-templates` — minimal, deterministic subprocess; nothing from the user's `~/.pi/agent/` loads.
+
+On Windows, `pi` is a `.cmd` wrapper. `Process.start` must use `runInShell: true` so the OS resolves `pi.cmd` correctly.
+
+**Prompt message format:**
+
+```
+Document context:
+<full document text>
+
+Edit target:
+<selected text, or full document if no selection>
+
+Instruction: <user's typed instruction>
+
+IMPORTANT: Reply with ONLY the transformed text. No explanations, no preamble.
+```
+
+Sent as `{"type": "prompt", "message": "..."}` (no `id` — single prompt per process, no correlation needed).
+
+**Handling the `prompt` command response:**
+
+Pi responds with `{"type": "response", "command": "prompt", "success": true/false}` immediately before events start streaming. If `success: false`, treat it as an error and show the error banner. If `success: true`, events follow — no action needed.
+
+**Text delta extraction:**
+
+```dart
+if (event['type'] == 'message_update') {
+  final delta = event['assistantMessageEvent'];
+  if (delta?['type'] == 'text_delta') {
+    yield delta['delta'] as String;
+  }
+}
+```
+
+**Abort:**
+
+Sends `{"type": "abort"}` to Pi's stdin. Pi stops mid-stream and emits `agent_end` (or exits cleanly). The stream completes normally — no error banner shown.
+
+**Process lifecycle:**
+
+Pi is spawned fresh on each `Ctrl+K` invocation. `dispose()` is called when `EditorScreen` disposes, killing any lingering process.
+
+**Stderr drain:**
+
+A dedicated listener on `proc.stderr` discards lines. Without it, the child's stderr pipe fills and the process blocks.
+
+#### Error handling — error banner
+
+Two failure conditions surface as a dismissable **error banner** below the tab bar. The editor unlocks immediately.
+
+| Condition                                                               | Banner text                                                                                                |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `pi` not found (process launch fails)                                   | "`pi` not found — install it with `npm install -g @mariozechner/pi-coding-agent` and ensure it's on PATH." |
+| Pi exits without `agent_end`, or `auto_retry_end` with `success: false` | "Pi process exited unexpectedly — try again."                                                              |
+
+The banner persists until the user clicks `×`. A new error replaces the previous one.
+
+#### `EditorScreen` changes
+
+| Concern              | Change                                                                                                                                                                                                                                                                                         |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Service field        | `_aiService` (type `AiService`) → `_piRpcService` (type `PiRpcService`).                                                                                                                                                                                                                       |
+| `_submitAiPrompt`    | `await for`s chunks from `streamEdit`; first chunk triggers `_diffVisible = true` + `_diffFocusNode.requestFocus()` (post-frame); subsequent chunks append to `_diffProposed` + `setState`. Wrapped in `try/catch/finally`: catch sets `_errorBanner`, finally sets `_editorReadOnly = false`. |
+| Cancel button        | Shown while `_editorReadOnly && !_diffVisible`. Calls `_piRpcService.abort()` + unlocks editor. Once the diff is visible this button is gone — the cancel path from that point is Reject (Escape or button), which also calls `abort()`.                                                       |
+| Escape-while-loading | `Focus.onKeyEvent` on `EditorScreen`: `Escape` when `_editorReadOnly && !_aiPromptVisible && !_diffVisible` → calls `abort()`.                                                                                                                                                                 |
+| `_rejectDiff`        | Calls `_piRpcService.abort()` before the existing `setState`. Stops Pi if the stream is still running when the user rejects; no-op if it has already finished.                                                                                                                                 |
+| Error banner         | New `String? _errorBanner` field. Set on error; cleared on dismiss or next `Ctrl+K`. Rendered as a thin coloured row below the tab bar with a `×` dismiss button.                                                                                                                              |
+| Dispose              | `_piRpcService.dispose()` in `State.dispose()`.                                                                                                                                                                                                                                                |
+
+#### Phase 3.7 task checklist
+
+- [ ] Rename `ai_service.dart` → `pi_rpc_service.dart`; replace `AiService` stub with `PiRpcService`
+- [ ] `PiRpcService(piExecutable)` constructor; `streamEdit` spawns Pi with `runInShell: true`, drains stdout as JSON lines, yields `text_delta` chunks, completes on `agent_end`
+- [ ] `prompt` response check — if `success: false`, throw `PiRpcError` before entering the event loop
+- [ ] `PiRpcService.abort()` — write `{"type":"abort"}` to stdin; no-op if process not running
+- [ ] `PiRpcService.dispose()` — close stdin, kill process
+- [ ] Stderr drain — dedicated listener on `proc.stderr`; discard lines
+- [ ] Process exit without `agent_end` → throw `PiRpcError`
+- [ ] `auto_retry_end (success: false)` → throw `PiRpcError`
+- [ ] `EditorScreen`: replace `_aiService` with `_piRpcService: PiRpcService`
+- [ ] `_submitAiPrompt`: `await for` stream; open diff on first chunk; `try/catch/finally` to set error banner and unlock editor
+- [ ] Cancel button — shown while `_editorReadOnly && !_diffVisible`; calls `abort()` + unlocks editor
+- [ ] `_rejectDiff` calls `_piRpcService.abort()` before `setState` — stops Pi if stream still running
+- [ ] Escape-while-loading guard via `Focus.onKeyEvent` on `EditorScreen` → calls `abort()`
+- [ ] Error banner — inline in `EditorScreen.build`; `String? _errorBanner` field; `×` dismiss button
+- [ ] No new packages — `dart:io Process.start` + `dart:convert` handle everything
+
+---
+
 ### Phase 4 — Polish
 
 **End state:** the app feels complete and native. Visual refinements and quality-of-life improvements.
@@ -552,11 +720,12 @@ Only one external package is used. Everything else relies on the Flutter/Dart st
 
 **Stdlib replacements:**
 
-| Need                   | Solution                                                    |
-| ---------------------- | ----------------------------------------------------------- |
-| State management       | `ChangeNotifier` + `ListenableBuilder` (built into Flutter) |
-| Tab IDs                | Incrementing integer counter (`_nextTabId`)                 |
-| App data directory     | `dart:io` + `Platform.environment['APPDATA']` (Windows)     |
-| Text diffing (Phase 3) | Simple line-by-line diff with `dart:core`                   |
-| JSON serialization     | `dart:convert`                                              |
-| File read/write        | `dart:io`                                                   |
+| Need                       | Solution                                                                                                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| State management           | `ChangeNotifier` + `ListenableBuilder` (built into Flutter)                                                                                                        |
+| Tab IDs                    | Incrementing integer counter (`_nextTabId`)                                                                                                                        |
+| App data directory         | `dart:io` + `Platform.environment['APPDATA']` (Windows)                                                                                                            |
+| Text diffing (Phase 3)     | Simple line-by-line diff with `dart:core`                                                                                                                          |
+| JSON serialization         | `dart:convert`                                                                                                                                                     |
+| File read/write            | `dart:io`                                                                                                                                                          |
+| AI integration (Phase 3.7) | `dart:io Process.start` — spawn `pi --mode rpc` as a child process; read JSON lines from stdout; write JSON commands to stdin. No HTTP client, no API keys in-app. |
