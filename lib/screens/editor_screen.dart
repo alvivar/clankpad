@@ -43,6 +43,11 @@ class _EditorScreenState extends State<EditorScreen> {
   // Error banner — set when Pi fails; cleared on dismiss or next Ctrl+K.
   String? _errorBanner;
 
+  // Prompt history — session-only; entries appended on each successful submit.
+  final List<String> _promptHistory = [];
+  int _historyIndex = 0; // reset to _promptHistory.length on popup open
+  String _historySavedInput = ''; // preserves draft while navigating history
+
   // Guards against re-entrant close attempts while a dialog is showing.
   bool _closingTab = false;
 
@@ -207,11 +212,42 @@ class _EditorScreenState extends State<EditorScreen> {
 
     final controller = _state.activeTab.controller;
 
+    // Reset history navigation to the "past-the-end" position so the first
+    // Up press goes to the most recent entry (not where we left off last time).
+    _historyIndex = _promptHistory.length;
+    _historySavedInput = '';
+
     setState(() {
       _snapshotDocumentText = controller.text;
       _snapshotSelection = controller.selection;
       _aiPromptVisible = true;
     });
+  }
+
+  // ── Prompt history ───────────────────────────────────────────────────────────
+
+  /// Called by [AiPromptPopup] when the user presses Up on the first line.
+  /// Returns the text to display, or null to let the TextField handle the key.
+  String? _historyUp(String currentText) {
+    if (_promptHistory.isEmpty) return null;
+    if (_historyIndex == _promptHistory.length) {
+      _historySavedInput = currentText; // first Up — save current draft
+    }
+    if (_historyIndex > 0) {
+      _historyIndex--;
+      return _promptHistory[_historyIndex];
+    }
+    return null; // already at oldest — let TextField move cursor normally
+  }
+
+  /// Called by [AiPromptPopup] when the user presses Down on the last line.
+  /// Returns the text to display, or null to let the TextField handle the key.
+  String? _historyDown(String currentText) {
+    if (_historyIndex >= _promptHistory.length) return null;
+    _historyIndex++;
+    return _historyIndex == _promptHistory.length
+        ? _historySavedInput // past end — restore saved draft
+        : _promptHistory[_historyIndex];
   }
 
   void _dismissAiPrompt() {
@@ -227,6 +263,13 @@ class _EditorScreenState extends State<EditorScreen> {
     final sel = _snapshotSelection;
     final docText = _snapshotDocumentText;
     final editTarget = sel.isCollapsed ? docText : sel.textInside(docText);
+
+    // Append to history; skip consecutive duplicates; cap at 50.
+    if (_promptHistory.isEmpty || _promptHistory.last != prompt) {
+      _promptHistory.add(prompt);
+      if (_promptHistory.length > 50) _promptHistory.removeAt(0);
+    }
+    _historyIndex = _promptHistory.length;
 
     setState(() {
       _aiPromptVisible = false;
@@ -563,6 +606,8 @@ class _EditorScreenState extends State<EditorScreen> {
                       AiPromptPopup(
                         onDismiss: _dismissAiPrompt,
                         onSubmit: _submitAiPrompt,
+                        onHistoryUp: _historyUp,
+                        onHistoryDown: _historyDown,
                       ),
 
                     if (_diffVisible)

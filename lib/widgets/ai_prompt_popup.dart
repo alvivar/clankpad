@@ -5,10 +5,21 @@ class AiPromptPopup extends StatefulWidget {
   final VoidCallback onDismiss;
   final ValueChanged<String> onSubmit;
 
+  /// Called when the user presses Up on the first line of the prompt field.
+  /// Receives the current field text; returns the text to show, or null to
+  /// let the TextField handle the key normally (cursor moves up / no-op).
+  final String? Function(String currentText)? onHistoryUp;
+
+  /// Called when the user presses Down on the last line of the prompt field.
+  /// Same contract as [onHistoryUp].
+  final String? Function(String currentText)? onHistoryDown;
+
   const AiPromptPopup({
     super.key,
     required this.onDismiss,
     required this.onSubmit,
+    this.onHistoryUp,
+    this.onHistoryDown,
   });
 
   @override
@@ -34,6 +45,24 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
     _textFieldFocusNode.dispose();
     super.dispose();
   }
+
+  // ── Cursor-position helpers ──────────────────────────────────────────────────
+
+  /// True when the cursor sits on (or before the end of) the first line.
+  bool _isOnFirstLine() {
+    final offset = _promptController.selection.baseOffset;
+    if (offset < 0) return false;
+    return !_promptController.text.substring(0, offset).contains('\n');
+  }
+
+  /// True when the cursor sits on (or after the start of) the last line.
+  bool _isOnLastLine() {
+    final offset = _promptController.selection.baseOffset;
+    if (offset < 0) return false;
+    return !_promptController.text.substring(offset).contains('\n');
+  }
+
+  // ── Submit ───────────────────────────────────────────────────────────────────
 
   void _submit() {
     final prompt = _promptController.text.trim();
@@ -79,13 +108,55 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
               borderRadius: BorderRadius.circular(8),
               color: colorScheme.surfaceContainerHigh,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
                 // Focus wraps the TextField to intercept Enter/Escape.
                 // Key events bubble up from the focused TextField to this Focus,
                 // so we never need to focus the outer node directly.
                 child: Focus(
                   onKeyEvent: (node, event) {
-                    // Only act on initial key-down to avoid double-firing on repeat.
+                    // Up/Down history navigation responds to both KeyDown and
+                    // KeyRepeat so holding the key scrolls smoothly.
+                    if (event is KeyDownEvent || event is KeyRepeatEvent) {
+                      if (event.logicalKey == LogicalKeyboardKey.arrowUp &&
+                          _isOnFirstLine()) {
+                        final text = widget.onHistoryUp?.call(
+                          _promptController.text,
+                        );
+                        if (text != null) {
+                          _promptController.value = TextEditingValue(
+                            text: text,
+                            selection: TextSelection.collapsed(
+                              offset: text.length,
+                            ),
+                          );
+                          return KeyEventResult.handled;
+                        }
+                        // No history entry — TextField moves cursor normally.
+                        return KeyEventResult.ignored;
+                      }
+
+                      if (event.logicalKey == LogicalKeyboardKey.arrowDown &&
+                          _isOnLastLine()) {
+                        final text = widget.onHistoryDown?.call(
+                          _promptController.text,
+                        );
+                        if (text != null) {
+                          _promptController.value = TextEditingValue(
+                            text: text,
+                            selection: TextSelection.collapsed(
+                              offset: text.length,
+                            ),
+                          );
+                          return KeyEventResult.handled;
+                        }
+                        return KeyEventResult.ignored;
+                      }
+                    }
+
+                    // Enter and Escape only act on the initial key-down.
                     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
                     // Enter (without Shift) → submit.
@@ -109,7 +180,10 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                     controller: _promptController,
                     focusNode: _textFieldFocusNode,
                     maxLines: null, // allows Shift+Enter newlines
-                    style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: colorScheme.onSurface,
+                    ),
                     decoration: InputDecoration(
                       hintText:
                           'Edit instruction… (Enter to submit, Shift+Enter for newline, Esc to dismiss)',

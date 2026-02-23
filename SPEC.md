@@ -664,7 +664,9 @@ Pi is spawned on the first `Ctrl+K` and kept alive between invocations. `proc.st
 
 The process is killed only on error paths (`!agentEndReceived`). On success and after abort, the process stays warm. If Pi exits unexpectedly between invocations, `_stdoutSub.onDone` fires: `_process` and `_stdoutSub` are nulled, and `_lineController` is closed if open (which signals an error to any active stream). The next `streamEdit` call sees `_process == null` and spawns fresh.
 
-`dispose()` cancels `_stdoutSub`, closes `_lineController`, and kills `_process`.
+`_killProcess()` calls `proc.kill()` **synchronously as its first action**, before any `await` points. This guarantees Pi is signalled even if the Dart process exits during the subsequent async cleanup (`_stdoutSub.cancel()`, `proc.stdin.close()`). Without this ordering, a force-close of Clankpad could exit the Dart process between awaits, leaving Pi orphaned on Windows (child processes are not automatically killed when the parent exits on Windows — no Job Object is in use).
+
+`dispose()` closes `_lineController` first (unblocking any active stream), then delegates to `_killProcess()`.
 
 **Stderr drain:**
 
@@ -704,7 +706,7 @@ The banner persists until the user clicks `×`. A new error replaces the previou
 - [x] `auto_retry_end (success: false)` → throw `PiRpcError`
 - [x] Process exit without `agent_end` (stdout closes) → `_stdoutSub.onDone` closes `_lineController`; active stream errors; next call spawns fresh
 - [x] `PiRpcService.abort()` — write `{"type":"abort"}` to stdin; no-op if no process
-- [x] `PiRpcService.dispose()` — cancel `_stdoutSub`, close `_lineController`, kill `_process`
+- [x] `PiRpcService.dispose()` — close `_lineController` (unblocks active stream), then `_killProcess()` which kills `_process` first (synchronous), then cancels `_stdoutSub`
 - [x] `EditorScreen`: replace `_aiService` with `_piRpcService: PiRpcService`
 - [x] `_submitAiPrompt`: `await for` stream; open diff on first chunk; `try/catch/finally` to set error banner and unlock editor
 - [x] Cancel button — shown while `_editorReadOnly && !_diffVisible`; calls `abort()` + unlocks editor
@@ -712,6 +714,109 @@ The banner persists until the user clicks `×`. A new error replaces the previou
 - [x] Escape-while-loading guard via `Focus.onKeyEvent` on `EditorScreen` → calls `abort()`
 - [x] Error banner — inline in `EditorScreen.build`; `String? _errorBanner` field; `×` dismiss button
 - [x] No new packages — `dart:io Process.start` + `dart:convert` handle everything
+
+---
+
+### Phase 3.8 — Prompt History
+
+**End state:** pressing Up/Down in the `Ctrl+K` prompt field navigates through previously submitted instructions, identical to Cursor's AI edit UX.
+
+#### Behaviour
+
+- History is session-only (in memory, not persisted to disk).
+- Entries are appended on every successful submit. Consecutive duplicates are skipped. Capped at 50 entries.
+- Up/Down only trigger history navigation when the cursor is on the **first / last line** of the field respectively. When the cursor is mid-text, Up/Down move the caret normally.
+- The first Up press saves whatever is currently in the field (`_historySavedInput`). Pressing Down past the newest history entry restores it — nothing the user typed is lost.
+- History index resets to `_promptHistory.length` (past-the-end) every time the popup opens.
+- Both `KeyDownEvent` and `KeyRepeatEvent` trigger history navigation so holding the key scrolls smoothly.
+
+**Navigation example:**
+
+```
+field:  "make it bold"          ← user typed this, hasn't submitted yet
+Up  →   "previous instruction"  ← _historySavedInput = "make it bold"
+Up  →   "older instruction"
+Down →  "previous instruction"
+Down →  "make it bold"          ← restored from _historySavedInput
+```
+
+After navigation the cursor is placed at the end of the restored text.
+
+#### Cursor-position helpers (on `_AiPromptPopupState`)
+
+```dart
+bool _isOnFirstLine() {
+  final offset = _promptController.selection.baseOffset;
+  if (offset < 0) return false;
+  return !_promptController.text.substring(0, offset).contains('\n');
+}
+
+bool _isOnLastLine() {
+  final offset = _promptController.selection.baseOffset;
+  if (offset < 0) return false;
+  return !_promptController.text.substring(offset).contains('\n');
+}
+```
+
+#### History methods (on `_EditorScreenState`)
+
+```dart
+String? _historyUp(String currentText) {
+  if (_promptHistory.isEmpty) return null;
+  if (_historyIndex == _promptHistory.length) {
+    _historySavedInput = currentText; // first Up — save current draft
+  }
+  if (_historyIndex > 0) {
+    _historyIndex--;
+    return _promptHistory[_historyIndex];
+  }
+  return null; // already at oldest — TextField handles Up normally
+}
+
+String? _historyDown(String currentText) {
+  if (_historyIndex >= _promptHistory.length) return null;
+  _historyIndex++;
+  return _historyIndex == _promptHistory.length
+      ? _historySavedInput  // past end — restore saved draft
+      : _promptHistory[_historyIndex];
+}
+```
+
+`null` means "no history move — let the TextField handle the key normally."
+
+#### `Focus.onKeyEvent` restructure in `AiPromptPopup`
+
+Up/Down are handled on `KeyDownEvent` and `KeyRepeatEvent`; Enter/Escape remain `KeyDownEvent`-only:
+
+```
+if (KeyDown or KeyRepeat) AND arrowUp AND _isOnFirstLine():
+    result = onHistoryUp(currentText)
+    if result != null → set controller text, cursor to end, return handled
+    else → return ignored   ← TextField moves cursor up normally
+
+same pattern for arrowDown + _isOnLastLine()
+
+if not KeyDownEvent → return ignored   ← existing gate for Enter/Escape
+handle Enter, Escape as today
+```
+
+#### Changes
+
+| File                   | What changes                                                                                                                                                                                                                                                               |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `editor_screen.dart`   | Add `_promptHistory`, `_historyIndex`, `_historySavedInput` fields; add `_historyUp` / `_historyDown` methods; update `_submitAiPrompt` (append to history, reset index); reset index + saved input on popup open; pass `onHistoryUp` / `onHistoryDown` to `AiPromptPopup` |
+| `ai_prompt_popup.dart` | Add `onHistoryUp` / `onHistoryDown` callback parameters; add `_isOnFirstLine` / `_isOnLastLine` helpers; restructure `Focus.onKeyEvent`                                                                                                                                    |
+
+#### Phase 3.8 task checklist
+
+- [x] `EditorScreen`: add `List<String> _promptHistory`, `int _historyIndex`, `String _historySavedInput` fields
+- [x] `EditorScreen`: add `_historyUp(String) → String?` and `_historyDown(String) → String?` methods
+- [x] `EditorScreen`: on popup open — reset `_historyIndex = _promptHistory.length`, `_historySavedInput = ''`
+- [x] `EditorScreen`: in `_submitAiPrompt` — append to `_promptHistory` (skip consecutive duplicate, cap 50), reset `_historyIndex`
+- [x] `EditorScreen`: pass `onHistoryUp` and `onHistoryDown` to `AiPromptPopup`
+- [x] `AiPromptPopup`: add `onHistoryUp` / `onHistoryDown` nullable callback parameters
+- [x] `AiPromptPopup`: add `_isOnFirstLine` / `_isOnLastLine` helpers
+- [x] `AiPromptPopup`: restructure `Focus.onKeyEvent` — Up/Down on `KeyDownEvent`+`KeyRepeatEvent`; Enter/Escape `KeyDownEvent`-only
 
 ---
 
