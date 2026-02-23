@@ -22,7 +22,6 @@ class PiRpcService {
   final String piExecutable;
 
   Process? _process;
-  bool _disposed = false;
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -35,8 +34,6 @@ class PiRpcService {
     required String editTarget,
     required String userInstruction,
   }) async* {
-    if (_disposed) return;
-
     final message = _buildPromptMessage(
       documentText,
       editTarget,
@@ -85,7 +82,6 @@ class PiRpcService {
     // ── Stream events ─────────────────────────────────────────────────────────
 
     bool agentEndReceived = false;
-    Object? pendingError;
 
     try {
       await for (final line
@@ -106,10 +102,9 @@ class PiRpcService {
         // prompt command acknowledgement — check before events start flowing
         if (type == 'response') {
           if (event['command'] == 'prompt' && event['success'] != true) {
-            pendingError = const PiRpcError(
+            throw const PiRpcError(
               'Pi process exited unexpectedly — try again.',
             );
-            break;
           }
           continue; // other response types (e.g. abort ack) are ignored
         }
@@ -134,10 +129,7 @@ class PiRpcService {
 
         // All retries exhausted
         if (type == 'auto_retry_end' && event['success'] == false) {
-          pendingError = const PiRpcError(
-            'Pi process exited unexpectedly — try again.',
-          );
-          break;
+          throw const PiRpcError('Pi process exited unexpectedly — try again.');
         }
 
         // All other events (turn_start, message_start, thinking_delta, etc.)
@@ -145,15 +137,12 @@ class PiRpcService {
       }
     } finally {
       _process = null;
-      // Kill Pi on error paths to avoid orphan processes. On a clean abort
-      // Pi emits agent_end before exiting, so agentEndReceived will be true.
-      if (!agentEndReceived && !_disposed) {
-        proc.kill();
-      }
+      // Kill Pi on error/unexpected-exit paths. On a clean abort Pi emits
+      // agent_end before exiting, so agentEndReceived will be true.
+      if (!agentEndReceived) proc.kill();
     }
 
-    if (pendingError != null) throw pendingError;
-    if (!agentEndReceived && !_disposed) {
+    if (!agentEndReceived) {
       throw const PiRpcError('Pi process exited unexpectedly — try again.');
     }
   }
@@ -176,7 +165,6 @@ class PiRpcService {
   /// Kills the Pi process and marks this service as disposed.
   /// After [dispose], [streamEdit] returns an empty stream immediately.
   Future<void> dispose() async {
-    _disposed = true;
     final proc = _process;
     if (proc == null) return;
     _process = null;

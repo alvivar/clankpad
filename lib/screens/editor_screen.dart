@@ -167,8 +167,9 @@ class _EditorScreenState extends State<EditorScreen> {
   Future<bool> _saveTab(int index) async {
     final tab = _state.tabs[index];
     if (tab.filePath != null && !tab.isDirty) return true;
-    if (tab.filePath != null)
+    if (tab.filePath != null) {
       return _writeFile(tab.filePath!, tab.controller.text, index);
+    }
     return _saveTabAs(index);
   }
 
@@ -421,6 +422,7 @@ class _EditorScreenState extends State<EditorScreen> {
     // the same upward path. All shortcuts here are also editor-specific —
     // Ctrl+N creating a tab while a settings route is active would be wrong,
     // so EditorScreen scope is correct by design, not just by convenience.
+    final colorScheme = Theme.of(context).colorScheme;
     return Shortcuts(
       shortcuts: const {
         SingleActivator(LogicalKeyboardKey.keyN, control: true): NewTabIntent(),
@@ -468,119 +470,113 @@ class _EditorScreenState extends State<EditorScreen> {
           ),
         },
         child: Scaffold(
-          body: Builder(
-            builder: (context) {
-              final colorScheme = Theme.of(context).colorScheme;
-              return Column(
-                children: [
-                  // Tab bar
-                  EditorTabBar(
-                    tabs: _state.tabs,
-                    activeTabIndex: _state.activeTabIndex,
-                    onTabTap: _state.switchTab,
-                    onTabClose: _handleCloseTab,
-                    onNewTab: _state.newTab,
-                  ),
+          body: Column(
+            children: [
+              // Tab bar
+              EditorTabBar(
+                tabs: _state.tabs,
+                activeTabIndex: _state.activeTabIndex,
+                onTabTap: _state.switchTab,
+                onTabClose: _handleCloseTab,
+                onNewTab: _state.newTab,
+              ),
 
-                  // Error banner — shown after a Pi failure; dismissed by ×.
-                  if (_errorBanner != null)
-                    ColoredBox(
-                      color: colorScheme.errorContainer,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                _errorBanner!,
-                                style: TextStyle(
-                                  color: colorScheme.onErrorContainer,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ),
-                            IconButton(
-                              onPressed: () =>
-                                  setState(() => _errorBanner = null),
-                              icon: const Icon(Icons.close),
-                              iconSize: 16,
-                              color: colorScheme.onErrorContainer,
-                              visualDensity: VisualDensity.compact,
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                            ),
-                            const SizedBox(width: 4),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                  // Progress stripe + cancel button: visible while Pi is
-                  // running and the diff view has not yet opened.
-                  if (_editorReadOnly && !_diffVisible) ...[
-                    const LinearProgressIndicator(minHeight: 2),
-                    ColoredBox(
-                      color: colorScheme.surfaceContainerLow,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton(
-                              onPressed: _cancelAiRequest,
-                              style: TextButton.styleFrom(
-                                foregroundColor: colorScheme.onSurfaceVariant,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 2,
-                                ),
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                              child: const Text(
-                                'Cancel  (Esc)',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-
-                  // Editor area + overlays
-                  Expanded(
-                    child: Stack(
+              // Error banner — shown after a Pi failure; dismissed by ×.
+              if (_errorBanner != null)
+                ColoredBox(
+                  color: colorScheme.errorContainer,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+                    child: Row(
                       children: [
-                        EditorArea(
-                          tab: _state.activeTab,
-                          readOnly: _editorReadOnly,
-                          focusNode: _editorFocusNode,
+                        Expanded(
+                          child: Text(
+                            _errorBanner!,
+                            style: TextStyle(
+                              color: colorScheme.onErrorContainer,
+                              fontSize: 13,
+                            ),
+                          ),
                         ),
-
-                        if (_aiPromptVisible)
-                          AiPromptPopup(
-                            onDismiss: _dismissAiPrompt,
-                            onSubmit: _submitAiPrompt,
-                          ),
-
-                        if (_diffVisible)
-                          AiDiffView(
-                            focusNode: _diffFocusNode,
-                            editTarget: _diffEditTarget,
-                            proposed: _diffProposed,
-                            onAccept: _acceptDiff,
-                            onReject: _rejectDiff,
-                          ),
+                        IconButton(
+                          onPressed: () => setState(() => _errorBanner = null),
+                          icon: const Icon(Icons.close),
+                          iconSize: 16,
+                          color: colorScheme.onErrorContainer,
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                        const SizedBox(width: 4),
                       ],
                     ),
                   ),
-                ],
-              );
-            },
+                ),
+
+              // Progress stripe + cancel button: visible while Pi is
+              // running and the diff view has not yet opened.
+              if (_editorReadOnly && !_diffVisible) ...[
+                const LinearProgressIndicator(minHeight: 2),
+                ColoredBox(
+                  color: colorScheme.surfaceContainerLow,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: _cancelAiRequest,
+                          style: TextButton.styleFrom(
+                            foregroundColor: colorScheme.onSurfaceVariant,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 2,
+                            ),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: const Text(
+                            'Cancel  (Esc)',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+
+              // Editor area + overlays
+              Expanded(
+                child: Stack(
+                  children: [
+                    EditorArea(
+                      tab: _state.activeTab,
+                      readOnly: _editorReadOnly,
+                      focusNode: _editorFocusNode,
+                    ),
+
+                    if (_aiPromptVisible)
+                      AiPromptPopup(
+                        onDismiss: _dismissAiPrompt,
+                        onSubmit: _submitAiPrompt,
+                      ),
+
+                    if (_diffVisible)
+                      AiDiffView(
+                        focusNode: _diffFocusNode,
+                        editTarget: _diffEditTarget,
+                        proposed: _diffProposed,
+                        onAccept: _acceptDiff,
+                        onReject: _rejectDiff,
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
