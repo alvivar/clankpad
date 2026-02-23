@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../models/editor_tab.dart';
 import '../models/intents.dart';
-import '../services/ai_service.dart';
+import '../services/pi_rpc_service.dart';
 import '../state/editor_state.dart';
 import '../widgets/ai_diff_view.dart';
 import '../widgets/ai_prompt_popup.dart';
@@ -35,10 +35,13 @@ class _EditorScreenState extends State<EditorScreen> {
   String _snapshotDocumentText = '';
   TextSelection _snapshotSelection = const TextSelection.collapsed(offset: 0);
 
-  // Diff view state — populated after the AI response arrives.
+  // Diff view state — populated as chunks arrive from the AI stream.
   bool _diffVisible = false;
   String _diffEditTarget = '';
   String _diffProposed = '';
+
+  // Error banner — set when Pi fails; cleared on dismiss or next Ctrl+K.
+  String? _errorBanner;
 
   // Guards against re-entrant close attempts while a dialog is showing.
   bool _closingTab = false;
@@ -53,9 +56,9 @@ class _EditorScreenState extends State<EditorScreen> {
   // after accept / reject.
   final FocusNode _diffFocusNode = FocusNode();
 
-  // Kept as a field so it can hold state (HTTP client, API key, etc.) when
-  // real AI integration lands, and is properly disposed with the screen.
-  final _aiService = AiService();
+  // Owned as a field so the process is killed if the screen is disposed while
+  // a request is in-flight.
+  final _piRpcService = PiRpcService();
 
   // ── Convenience ─────────────────────────────────────────────────────────────
 
@@ -82,7 +85,7 @@ class _EditorScreenState extends State<EditorScreen> {
     _state.removeListener(_onEditorStateChanged);
     _editorFocusNode.dispose();
     _diffFocusNode.dispose();
-    _aiService.dispose();
+    _piRpcService.dispose();
     super.dispose();
   }
 
@@ -164,7 +167,8 @@ class _EditorScreenState extends State<EditorScreen> {
   Future<bool> _saveTab(int index) async {
     final tab = _state.tabs[index];
     if (tab.filePath != null && !tab.isDirty) return true;
-    if (tab.filePath != null) return _writeFile(tab.filePath!, tab.controller.text, index);
+    if (tab.filePath != null)
+      return _writeFile(tab.filePath!, tab.controller.text, index);
     return _saveTabAs(index);
   }
 
@@ -221,34 +225,66 @@ class _EditorScreenState extends State<EditorScreen> {
   Future<void> _submitAiPrompt(String prompt) async {
     final sel = _snapshotSelection;
     final docText = _snapshotDocumentText;
+    final editTarget = sel.isCollapsed ? docText : sel.textInside(docText);
 
     setState(() {
       _aiPromptVisible = false;
       _editorReadOnly =
-          true; // lock editor for the duration of request + diff review
+          true; // locked until diff is accepted/rejected/cancelled
+      _diffProposed = '';
+      _errorBanner = null; // clear any previous error
     });
 
-    final editTarget = sel.isCollapsed ? docText : sel.textInside(docText);
+    bool diffOpened = false;
 
-    final result = await _aiService.getCompletion(
-      documentText: docText,
-      editTarget: editTarget,
-      prompt: prompt,
-    );
+    try {
+      await for (final chunk in _piRpcService.streamEdit(
+        documentText: docText,
+        editTarget: editTarget,
+        userInstruction: prompt,
+      )) {
+        // Exit if the widget was disposed or the user cancelled (which sets
+        // _editorReadOnly = false) before the diff was opened.
+        if (!mounted || !_editorReadOnly) return;
 
-    if (!mounted) return;
+        if (!diffOpened) {
+          // First chunk: open the diff view and focus it.
+          diffOpened = true;
+          setState(() {
+            _diffVisible = true;
+            _diffEditTarget = editTarget;
+            _diffProposed = chunk;
+          });
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _diffFocusNode.requestFocus();
+          });
+        } else {
+          // Subsequent chunks: append to the live "After" pane.
+          setState(() => _diffProposed += chunk);
+        }
+      }
+    } on PiRpcError catch (e) {
+      if (!mounted) return;
+      setState(() => _errorBanner = e.message);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _errorBanner = 'Unexpected error — $e');
+    } finally {
+      // Always unlock the editor, even on error or cancel.
+      // If the diff is visible the editor was already locked; it stays locked
+      // until the user accepts/rejects, so we only clear it here when the
+      // diff did not open (error or pre-diff cancel).
+      if (mounted && !_diffVisible) {
+        setState(() => _editorReadOnly = false);
+      }
+    }
+  }
 
-    // Show the diff view; keep editor locked until the user decides.
-    setState(() {
-      _diffVisible = true;
-      _diffEditTarget = editTarget;
-      _diffProposed = result;
-    });
-
-    // Request focus after the frame so _diffFocusNode is mounted first.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _diffFocusNode.requestFocus();
-    });
+  /// Aborts the in-flight Pi request and immediately unlocks the editor.
+  /// Only valid while the loading state is active (before the diff opens).
+  void _cancelAiRequest() {
+    _piRpcService.abort();
+    setState(() => _editorReadOnly = false);
   }
 
   // ── Diff accept / reject ─────────────────────────────────────────────────────
@@ -284,6 +320,9 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   void _rejectDiff() {
+    // Abort Pi if the stream is still running (e.g. user rejects while
+    // tokens are still arriving). No-op if the stream has already finished.
+    _piRpcService.abort();
     // Text is unchanged — no controller update needed.
     setState(() {
       _diffVisible = false;
@@ -394,6 +433,10 @@ class _EditorScreenState extends State<EditorScreen> {
             SaveAsIntent(),
         SingleActivator(LogicalKeyboardKey.keyK, control: true):
             OpenAiPromptIntent(),
+        // Escape cancels the in-flight AI request before the diff opens.
+        // When the diff IS open, AiDiffView's inner Shortcuts intercept Escape
+        // first (for Reject), so this binding is only reachable during loading.
+        SingleActivator(LogicalKeyboardKey.escape): CancelAiIntent(),
       },
       child: Actions(
         actions: {
@@ -415,51 +458,129 @@ class _EditorScreenState extends State<EditorScreen> {
           OpenAiPromptIntent: CallbackAction<OpenAiPromptIntent>(
             onInvoke: (_) => _openAiPrompt(),
           ),
+          CancelAiIntent: CallbackAction<CancelAiIntent>(
+            onInvoke: (_) {
+              if (_editorReadOnly && !_aiPromptVisible && !_diffVisible) {
+                _cancelAiRequest();
+              }
+              return null;
+            },
+          ),
         },
         child: Scaffold(
-          body: Column(
-            children: [
-              // Tab bar
-              EditorTabBar(
-                tabs: _state.tabs,
-                activeTabIndex: _state.activeTabIndex,
-                onTabTap: _state.switchTab,
-                onTabClose: _handleCloseTab,
-                onNewTab: _state.newTab,
-              ),
+          body: Builder(
+            builder: (context) {
+              final colorScheme = Theme.of(context).colorScheme;
+              return Column(
+                children: [
+                  // Tab bar
+                  EditorTabBar(
+                    tabs: _state.tabs,
+                    activeTabIndex: _state.activeTabIndex,
+                    onTabTap: _state.switchTab,
+                    onTabClose: _handleCloseTab,
+                    onNewTab: _state.newTab,
+                  ),
 
-              // Thin progress stripe: visible while AI request is in-flight.
-              if (_editorReadOnly && !_diffVisible)
-                const LinearProgressIndicator(minHeight: 2),
-
-              // Editor area + overlays
-              Expanded(
-                child: Stack(
-                  children: [
-                    EditorArea(
-                      tab: _state.activeTab,
-                      readOnly: _editorReadOnly,
-                      focusNode: _editorFocusNode,
+                  // Error banner — shown after a Pi failure; dismissed by ×.
+                  if (_errorBanner != null)
+                    ColoredBox(
+                      color: colorScheme.errorContainer,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _errorBanner!,
+                                style: TextStyle(
+                                  color: colorScheme.onErrorContainer,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () =>
+                                  setState(() => _errorBanner = null),
+                              icon: const Icon(Icons.close),
+                              iconSize: 16,
+                              color: colorScheme.onErrorContainer,
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                            const SizedBox(width: 4),
+                          ],
+                        ),
+                      ),
                     ),
 
-                    if (_aiPromptVisible)
-                      AiPromptPopup(
-                        onDismiss: _dismissAiPrompt,
-                        onSubmit: _submitAiPrompt,
+                  // Progress stripe + cancel button: visible while Pi is
+                  // running and the diff view has not yet opened.
+                  if (_editorReadOnly && !_diffVisible) ...[
+                    const LinearProgressIndicator(minHeight: 2),
+                    ColoredBox(
+                      color: colorScheme.surfaceContainerLow,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            TextButton(
+                              onPressed: _cancelAiRequest,
+                              style: TextButton.styleFrom(
+                                foregroundColor: colorScheme.onSurfaceVariant,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 2,
+                                ),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: const Text(
+                                'Cancel  (Esc)',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-
-                    if (_diffVisible)
-                      AiDiffView(
-                        focusNode: _diffFocusNode,
-                        editTarget: _diffEditTarget,
-                        proposed: _diffProposed,
-                        onAccept: _acceptDiff,
-                        onReject: _rejectDiff,
-                      ),
+                    ),
                   ],
-                ),
-              ),
-            ],
+
+                  // Editor area + overlays
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        EditorArea(
+                          tab: _state.activeTab,
+                          readOnly: _editorReadOnly,
+                          focusNode: _editorFocusNode,
+                        ),
+
+                        if (_aiPromptVisible)
+                          AiPromptPopup(
+                            onDismiss: _dismissAiPrompt,
+                            onSubmit: _submitAiPrompt,
+                          ),
+
+                        if (_diffVisible)
+                          AiDiffView(
+                            focusNode: _diffFocusNode,
+                            editTarget: _diffEditTarget,
+                            proposed: _diffProposed,
+                            onAccept: _acceptDiff,
+                            onReject: _rejectDiff,
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),

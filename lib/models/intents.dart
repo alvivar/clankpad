@@ -31,3 +31,8 @@ class AcceptDiffIntent extends Intent {
 class RejectDiffIntent extends Intent {
   const RejectDiffIntent();
 }
+
+/// Fired by Escape while the AI request is in-flight (before the diff opens).
+class CancelAiIntent extends Intent {
+  const CancelAiIntent();
+}
