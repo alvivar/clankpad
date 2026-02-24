@@ -820,6 +820,223 @@ handle Enter, Escape as today
 
 ---
 
+### Phase 3.9 — Model & Thinking Level Picker
+
+**End state:** the `Ctrl+K` popup shows a footer toolbar with a model dropdown and a thinking level selector. Pi's auth and model configuration remain the single source of truth — Clankpad only reads what Pi already knows.
+
+#### UX
+
+A thin footer row sits below the text field, separated by a `Divider`:
+
+- **Model** (left): `DropdownMenu` listing every model from `get_available_models` by name. Shows `···` while loading, hidden on error. Defaults to first entry once loaded.
+- **Thinking level** (right): `SegmentedButton` with segments `off · low · med · high`. Only shown when the selected model has `reasoning: true`. Defaults to `medium` in-app — no Pi state query needed. `minimal` and `xhigh` are excluded (`minimal` is a negligible gradation; `xhigh` is OpenAI codex-max only).
+
+Both selections are session-only (in memory). A future `settings.json` alongside `session.json` would be the natural persistence step.
+
+**Loading state** (first popup open, Pi not yet running): model dropdown disabled showing `···`; thinking segment hidden. Pi spawns in background; `setState` updates the popup once `get_available_models` returns.
+
+**Error state** (`get_available_models` fails): both controls hidden; popup and submit still work normally; `set_model`/`set_thinking_level` are silently skipped.
+
+#### Pi RPC flow
+
+**On popup open** — non-blocking, runs while user types:
+
+1. `PiRpcService.warmUp()` → `_ensureRunning()` spawns Pi if not already alive
+2. `sendCommand({"type": "get_available_models"})` → populate model list; pre-select first entry
+
+**On submit** — prepended to existing write sequence, one `flush()`:
+
+1. `set_model` (if `_selectedModelId != null`)
+2. `set_thinking_level` (if selected model has `reasoning: true`)
+3. `new_session` + `prompt` as today
+
+`set_model` and `set_thinking_level` are sent **without** an `id` and handled by the existing event loop — same pattern as `new_session` and `prompt` today. No `Completer`s on the submit path.
+
+#### `PiRpcService` changes
+
+**`_ensureRunning()`** — extract the spawn-and-wire block currently inline in `streamEdit` into a shared helper. Both `streamEdit` and `warmUp` call it.
+
+**`_processLine(String)`** — replaces the inline lambda in `_stdoutSub`. Adds one routing branch before forwarding. During active streaming `_pendingCommands` is always empty so the branch is a no-op:
+
+```dart
+void _processLine(String line) {
+  final Map<String, dynamic> event;
+  try { event = jsonDecode(line); } catch (_) { return; }
+  if (event['type'] == 'response' && event['id'] is String) {
+    _pendingCommands.remove(event['id'] as String)?.complete(event);
+    return; // do NOT forward to _lineController
+  }
+  _lineController?.add(line);
+}
+```
+
+**`sendCommand(Map) → Future<Map>`** — sends a command with a fresh `id`, registers a `Completer`, awaits the response with a 5 s timeout. Used **only** for `get_available_models` at popup open. Throws `PiRpcError` on timeout or `success: false`.
+
+**`warmUp() → Future<void>`** — one line: `_ensureRunning()`.
+
+**`dispose()`** — before existing cleanup: complete any pending completers with an error so callers don't hang.
+
+**`streamEdit()`** — gains three optional params (`modelProvider`, `modelId`, `thinkingLevel`). Before the existing `new_session` write:
+
+```dart
+if (modelId != null)
+  proc.stdin.writeln(jsonEncode({'type': 'set_model',
+      'provider': modelProvider, 'modelId': modelId}));
+if (modelSupportsThinking)
+  proc.stdin.writeln(jsonEncode({'type': 'set_thinking_level',
+      'level': thinkingLevel}));
+// existing: new_session, prompt, flush
+```
+
+The event loop gains two response cases alongside the existing `prompt` check:
+
+```dart
+if (type == 'response') {
+  if (event['command'] == 'set_model' && event['success'] != true)
+    throw PiRpcError('set_model failed: ${event['error']}');
+  if (event['command'] == 'set_thinking_level' && event['success'] != true)
+    throw PiRpcError('set_thinking_level failed: ${event['error']}');
+  if (event['command'] == 'prompt' && event['success'] != true) ...
+  continue;
+}
+```
+
+#### `EditorScreen` changes
+
+Five new fields:
+
+```dart
+List<Map<String, dynamic>> _availableModels = [];
+bool _modelsLoading = false;
+String? _selectedProvider;
+String? _selectedModelId;   // null = let Pi use its configured default
+String _thinkingLevel = 'medium';
+```
+
+`_selectedModelInfo` is not cached — derived inline where needed:
+
+```dart
+Map<String, dynamic>? get _selectedModelInfo => _availableModels
+    .cast<Map<String, dynamic>?>()
+    .firstWhere((m) => m?['id'] == _selectedModelId, orElse: () => null);
+```
+
+`_openAiPrompt` triggers warm-up + model fetch once (guarded by `_modelsLoading`):
+
+```dart
+if (_availableModels.isEmpty && !_modelsLoading) {
+  _modelsLoading = true;
+  _piRpcService.warmUp().then((_) {
+    return _piRpcService.sendCommand({'type': 'get_available_models'});
+  }).then((resp) {
+    if (!mounted) return;
+    final models = (resp['data']['models'] as List).cast<Map<String, dynamic>>();
+    setState(() {
+      _availableModels = models;
+      _modelsLoading = false;
+      if (models.isNotEmpty) {
+        _selectedModelId = models.first['id'] as String?;
+        _selectedProvider = models.first['provider'] as String?;
+      }
+    });
+  }).catchError((_) {
+    if (mounted) setState(() => _modelsLoading = false); // silent — submit still works
+  });
+}
+```
+
+`_submitAiPrompt` passes the three new params to `streamEdit`:
+
+```dart
+_piRpcService.streamEdit(
+  documentText: docText,
+  editTarget: editTarget,
+  userInstruction: prompt,
+  modelProvider: _selectedProvider,
+  modelId: _selectedModelId,
+  thinkingLevel: _thinkingLevel,
+)
+```
+
+`AiPromptPopup` receives one data object + two callbacks instead of seven raw params:
+
+```dart
+AiPromptPopup(
+  ...
+  modelSettings: AiModelSettings(
+    availableModels:      _availableModels,
+    loading:              _modelsLoading,
+    selectedModelId:      _selectedModelId,
+    modelSupportsThinking: _selectedModelInfo?['reasoning'] == true,
+    thinkingLevel:        _thinkingLevel,
+  ),
+  onModelChanged: (provider, modelId) => setState(() {
+    _selectedProvider = provider;
+    _selectedModelId  = modelId;
+  }),
+  onThinkingLevelChanged: (level) => setState(() => _thinkingLevel = level),
+)
+```
+
+#### `AiPromptPopup` changes
+
+Three new parameters:
+
+```dart
+final AiModelSettings? modelSettings;
+final void Function(String provider, String modelId)? onModelChanged;
+final void Function(String level)? onThinkingLevelChanged;
+```
+
+Footer row added below the `TextField` (only rendered when `modelSettings != null`):
+
+```dart
+const Divider(height: 1),
+SizedBox(
+  height: 32,
+  child: Row(children: [
+    _ModelPicker(settings: widget.modelSettings!, onChanged: widget.onModelChanged),
+    const Spacer(),
+    if (widget.modelSettings!.modelSupportsThinking)
+      _ThinkingPicker(level: widget.modelSettings!.thinkingLevel,
+                      onChanged: widget.onThinkingLevelChanged),
+  ]),
+),
+```
+
+`_ModelPicker`, `_ThinkingPicker`, and `AiModelSettings` are defined at the bottom of `ai_prompt_popup.dart` — all small enough to stay inline, no new files.
+
+`_ThinkingPicker` uses `SegmentedButton<String>` with segments `off · low · medium · high` (displayed as `off · low · med · high`).
+
+#### Changes
+
+| File                   | What changes                                                                                                                                                                                                               |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pi_rpc_service.dart`  | Extract `_ensureRunning()`; add `_processLine()` with response routing; add `_pendingCommands` + `_cmdCounter`; add `sendCommand()`; add `warmUp()`; update `dispose()`; add 3 params to `streamEdit()` + event-loop cases |
+| `editor_screen.dart`   | 5 new fields; `_selectedModelInfo` inline getter; `_openAiPrompt` warm-up + model fetch; `_submitAiPrompt` passes model/thinking to `streamEdit`; `AiPromptPopup` gets `AiModelSettings` + 2 callbacks                     |
+| `ai_prompt_popup.dart` | 3 new params; footer `Divider` + `Row`; `AiModelSettings` data class; private `_ModelPicker` and `_ThinkingPicker` widgets                                                                                                 |
+
+#### Phase 3.9 task checklist
+
+- [ ] `PiRpcService`: extract `_ensureRunning() → Future<Process>`
+- [ ] `PiRpcService`: add `_processLine(String)` — routes id-tagged responses to `_pendingCommands`, forwards everything else to `_lineController`
+- [ ] `PiRpcService`: add `_pendingCommands` map and `_cmdCounter` field
+- [ ] `PiRpcService`: add `sendCommand(Map) → Future<Map>` with 5 s timeout
+- [ ] `PiRpcService`: add `warmUp() → Future<void>`
+- [ ] `PiRpcService`: update `dispose()` — complete pending completers with error before clearing
+- [ ] `PiRpcService`: add `modelProvider`, `modelId`, `thinkingLevel` params to `streamEdit()`; write `set_model`/`set_thinking_level` before `new_session`; handle their responses in event loop
+- [ ] `EditorScreen`: add `_availableModels`, `_modelsLoading`, `_selectedProvider`, `_selectedModelId`, `_thinkingLevel` fields and `_selectedModelInfo` getter
+- [ ] `EditorScreen`: `_openAiPrompt` — trigger warm-up + model fetch (once, guarded by `_modelsLoading`)
+- [ ] `EditorScreen`: `_submitAiPrompt` — pass model/thinking params to `streamEdit`
+- [ ] `EditorScreen`: pass `AiModelSettings` + 2 callbacks to `AiPromptPopup`
+- [ ] `AiPromptPopup`: add `AiModelSettings` data class
+- [ ] `AiPromptPopup`: add `modelSettings`, `onModelChanged`, `onThinkingLevelChanged` parameters
+- [ ] `AiPromptPopup`: add footer `Divider` + `Row` below `TextField`
+- [ ] `AiPromptPopup`: add private `_ModelPicker` widget (`···` while loading, `DropdownMenu` when loaded)
+- [ ] `AiPromptPopup`: add private `_ThinkingPicker` widget (`SegmentedButton<String>`, compact style)
+
+---
+
 ### Phase 4 — Polish
 
 **End state:** the app feels complete and native. Visual refinements and quality-of-life improvements.
