@@ -303,22 +303,25 @@ class _ThinkingPicker extends StatelessWidget {
   final String level;
   final void Function(String level)? onChanged;
 
+  static const _levels = [
+    ('off', 'Thinking off'),
+    ('low', 'Low thinking'),
+    ('medium', 'Medium thinking'),
+    ('high', 'High thinking'),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    return SegmentedButton<String>(
-      segments: const [
-        ButtonSegment(value: 'off', label: Text('off')),
-        ButtonSegment(value: 'low', label: Text('low')),
-        ButtonSegment(value: 'medium', label: Text('med')),
-        ButtonSegment(value: 'high', label: Text('high')),
-      ],
-      selected: {level},
-      onSelectionChanged: (s) => onChanged?.call(s.first),
-      style: ButtonStyle(
-        textStyle: WidgetStatePropertyAll(const TextStyle(fontSize: 11)),
-        visualDensity: VisualDensity.compact,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
+    final colorScheme = Theme.of(context).colorScheme;
+    return DropdownButton<String>(
+      value: level,
+      isDense: true,
+      underline: const SizedBox.shrink(),
+      style: TextStyle(fontSize: 12, color: colorScheme.onSurface),
+      items: _levels.map((t) {
+        return DropdownMenuItem<String>(value: t.$1, child: Text(t.$2));
+      }).toList(),
+      onChanged: (v) => onChanged?.call(v ?? level),
     );
   }
 }
