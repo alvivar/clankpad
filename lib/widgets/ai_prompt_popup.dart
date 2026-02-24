@@ -285,7 +285,9 @@ class _ModelPicker extends StatelessWidget {
       items: settings.availableModels.map((m) {
         return DropdownMenuItem<String>(
           value: m['id'] as String,
-          child: Text(m['name'] as String? ?? m['id'] as String),
+          child: Text(
+            '${m['provider']}  ·  ${m['name'] as String? ?? m['id'] as String}',
+          ),
         );
       }).toList(),
       onChanged: (id) {
