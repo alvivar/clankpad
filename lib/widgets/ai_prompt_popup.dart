@@ -181,6 +181,39 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                           return KeyEventResult.ignored;
                         }
 
+                        // Ctrl+P — cycle model forward.
+                        if (event.logicalKey == LogicalKeyboardKey.keyP &&
+                            HardwareKeyboard.instance.isControlPressed) {
+                          final models =
+                              widget.modelSettings?.availableModels ?? [];
+                          if (models.isNotEmpty) {
+                            final cur = models.indexWhere(
+                              (m) =>
+                                  m['id'] ==
+                                  widget.modelSettings?.selectedModelId,
+                            );
+                            final next = (cur + 1) % models.length;
+                            final m = models[next];
+                            widget.onModelChanged?.call(
+                              m['provider'] as String,
+                              m['id'] as String,
+                            );
+                          }
+                          return KeyEventResult.handled;
+                        }
+
+                        // Shift+Tab — cycle thinking level forward.
+                        if (event.logicalKey == LogicalKeyboardKey.tab &&
+                            HardwareKeyboard.instance.isShiftPressed) {
+                          const levels = ['off', 'low', 'medium', 'high'];
+                          final cur = levels.indexOf(
+                            widget.modelSettings?.thinkingLevel ?? 'off',
+                          );
+                          final next = (cur + 1) % levels.length;
+                          widget.onThinkingLevelChanged?.call(levels[next]);
+                          return KeyEventResult.handled;
+                        }
+
                         if (event.logicalKey == LogicalKeyboardKey.enter &&
                             !HardwareKeyboard.instance.isShiftPressed) {
                           _submit();
@@ -226,12 +259,14 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                             _ModelPicker(
                               settings: settings,
                               onChanged: widget.onModelChanged,
+                              onFocusBack: _textFieldFocusNode.requestFocus,
                             ),
                             const Spacer(),
                             if (settings.modelSupportsThinking)
                               _ThinkingPicker(
                                 level: settings.thinkingLevel,
                                 onChanged: widget.onThinkingLevelChanged,
+                                onFocusBack: _textFieldFocusNode.requestFocus,
                               ),
                           ],
                         ),
@@ -251,10 +286,15 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
 // ── Private widgets ───────────────────────────────────────────────────────────
 
 class _ModelPicker extends StatelessWidget {
-  const _ModelPicker({required this.settings, this.onChanged});
+  const _ModelPicker({
+    required this.settings,
+    this.onChanged,
+    this.onFocusBack,
+  });
 
   final AiModelSettings settings;
   final void Function(String provider, String modelId)? onChanged;
+  final VoidCallback? onFocusBack;
 
   @override
   Widget build(BuildContext context) {
@@ -294,16 +334,22 @@ class _ModelPicker extends StatelessWidget {
         if (id == null) return;
         final m = settings.availableModels.firstWhere((m) => m['id'] == id);
         onChanged?.call(m['provider'] as String, id);
+        onFocusBack?.call();
       },
     );
   }
 }
 
 class _ThinkingPicker extends StatelessWidget {
-  const _ThinkingPicker({required this.level, this.onChanged});
+  const _ThinkingPicker({
+    required this.level,
+    this.onChanged,
+    this.onFocusBack,
+  });
 
   final String level;
   final void Function(String level)? onChanged;
+  final VoidCallback? onFocusBack;
 
   static const _levels = [
     ('off', 'Thinking off'),
@@ -323,7 +369,10 @@ class _ThinkingPicker extends StatelessWidget {
       items: _levels.map((t) {
         return DropdownMenuItem<String>(value: t.$1, child: Text(t.$2));
       }).toList(),
-      onChanged: (v) => onChanged?.call(v ?? level),
+      onChanged: (v) {
+        onChanged?.call(v ?? level);
+        onFocusBack?.call();
+      },
     );
   }
 }

@@ -1035,7 +1035,52 @@ SizedBox(
 - [x] `AiPromptPopup`: add `modelSettings`, `onModelChanged`, `onThinkingLevelChanged` parameters
 - [x] `AiPromptPopup`: add footer `Divider` + `Row` below `TextField`
 - [x] `AiPromptPopup`: add private `_ModelPicker` widget (`···` while loading, `DropdownMenu` when loaded)
-- [x] `AiPromptPopup`: add private `_ThinkingPicker` widget (`SegmentedButton<String>`, compact style)
+- [x] `AiPromptPopup`: add private `_ThinkingPicker` widget (`DropdownButton<String>`, always visible, 4 entries)
+
+---
+
+### Phase 3.10 — Popup keyboard shortcuts & focus restoration
+
+**End state:** after picking a model or thinking level the text field regains focus automatically. Two additional keyboard shortcuts let the user change model and thinking level without touching the mouse.
+
+#### Focus restoration
+
+After the `DropdownButton` route closes, Flutter returns focus to the app root rather than the `TextField`. Fix: both pickers accept a `VoidCallback onFocusBack` which they call at the end of their `onChanged` handler. `_AiPromptPopupState` supplies `() => _textFieldFocusNode.requestFocus()`.
+
+#### `Ctrl+P` — cycle model forward
+
+Handled in the existing `Focus.onKeyEvent` that wraps the `TextField` (same node that already intercepts Enter / Escape / arrow history).
+
+- If `availableModels` is empty or still loading → ignore (key falls through)
+- Find the index of `selectedModelId` in the list; treat `null` / not-found as `-1`
+- Next index = `(current + 1) % length`
+- Call `widget.onModelChanged(provider, id)` for the new entry
+- Return `KeyEventResult.handled` — stops the event before it reaches any app-level `Ctrl+P` binding
+
+#### `Shift+Tab` — cycle thinking level forward
+
+Same `Focus.onKeyEvent` handler, checked before Flutter's built-in Tab/focus-traversal logic.
+
+- Find index of `thinkingLevel` in the 4-item level list
+- Next index = `(current + 1) % 4`
+- Call `widget.onThinkingLevelChanged(nextLevel)`
+- Return `KeyEventResult.handled` — prevents Shift+Tab from moving focus out of the popup
+
+Cycle order: `off → low → medium → high → off → …`
+
+#### Changes
+
+| File                   | What changes                                                                                                                             |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `ai_prompt_popup.dart` | `_ModelPicker` + `_ThinkingPicker` gain `onFocusBack`; `_AiPromptPopupState` passes it; `Focus.onKeyEvent` gains `Ctrl+P` + `Shift+Tab` |
+
+#### Phase 3.10 task checklist
+
+- [x] `_ModelPicker`: add `VoidCallback? onFocusBack`; call after `onChanged`
+- [x] `_ThinkingPicker`: add `VoidCallback? onFocusBack`; call after `onChanged`
+- [x] `_AiPromptPopupState.build()`: pass `onFocusBack: _textFieldFocusNode.requestFocus` to both pickers
+- [x] `Focus.onKeyEvent`: add `Ctrl+P` → cycle model forward (wrap), return `handled`
+- [x] `Focus.onKeyEvent`: add `Shift+Tab` → cycle thinking level forward (wrap), return `handled`
 
 ---
 
