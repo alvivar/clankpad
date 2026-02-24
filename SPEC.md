@@ -828,26 +828,27 @@ handle Enter, Escape as today
 
 A thin footer row sits below the text field, separated by a `Divider`:
 
-- **Model** (left): `DropdownMenu` listing every model from `get_available_models` by name. Shows `···` while loading, hidden on error. Defaults to first entry once loaded.
-- **Thinking level** (right): `SegmentedButton` with segments `off · low · med · high`. Only shown when the selected model has `reasoning: true`. Defaults to `medium` in-app — no Pi state query needed. `minimal` and `xhigh` are excluded (`minimal` is a negligible gradation; `xhigh` is OpenAI codex-max only).
+- **Model** (left): `DropdownButton` listing models from `get_available_models`, filtered by `enabledModels` from `~/.pi/agent/settings.json`. Each item shows `provider  ·  Model Name`. Shows `···` while loading, disappears on error. Seeded from Pi's current model via `get_state`.
+- **Thinking level** (right): `DropdownButton` — `Thinking off · Low thinking · Medium thinking · High thinking`. **Only shown when the selected model has `reasoning: true`.** Seeded from Pi's live thinking level via `get_state`, normalised via `_normaliseLevel()`. `set_thinking_level` is always sent on submit — Pi ignores it for non-reasoning models.
 
-Both selections are session-only (in memory). A future `settings.json` alongside `session.json` would be the natural persistence step.
+Both selections are session-only (in memory).
 
-**Loading state** (first popup open, Pi not yet running): model dropdown disabled showing `···`; thinking segment hidden. Pi spawns in background; `setState` updates the popup once `get_available_models` returns.
+**Loading state** (first popup open): model dropdown shows `···` and is disabled; thinking dropdown is hidden until an effective model can be resolved. Pi spawns in background; `setState` updates once all three parallel calls return.
 
-**Error state** (`get_available_models` fails): both controls hidden; popup and submit still work normally; `set_model`/`set_thinking_level` are silently skipped.
+**Error state** (any fetch fails): model dropdown disappears; thinking dropdown stays. Submit still works.
 
 #### Pi RPC flow
 
 **On popup open** — non-blocking, runs while user types:
 
 1. `PiRpcService.warmUp()` → `_ensureRunning()` spawns Pi if not already alive
-2. `sendCommand({"type": "get_available_models"})` → populate model list; pre-select first entry
+2. Parallel fetch: `get_available_models` + `get_state` + `loadEnabledModelPatterns`
+3. Filter models by `enabledModels`; seed thinking level from `get_state`; if Pi's current model exists in filtered list seed provider/model selection
 
 **On submit** — prepended to existing write sequence, one `flush()`:
 
 1. `set_model` (if `_selectedModelId != null`)
-2. `set_thinking_level` (if selected model has `reasoning: true`)
+2. `set_thinking_level` (always; Pi ignores it for non-reasoning models)
 3. `new_session` + `prompt` as today
 
 `set_model` and `set_thinking_level` are sent **without** an `id` and handled by the existing event loop — same pattern as `new_session` and `prompt` today. No `Completer`s on the submit path.
@@ -870,22 +871,20 @@ void _processLine(String line) {
 }
 ```
 
-**`sendCommand(Map) → Future<Map>`** — sends a command with a fresh `id`, registers a `Completer`, awaits the response with a 5 s timeout. Used **only** for `get_available_models` at popup open. Throws `PiRpcError` on timeout or `success: false`.
+**`sendCommand(Map) → Future<Map>`** — sends a command with a fresh `id`, registers a `Completer`, awaits the response with a 5 s timeout. Used for `get_available_models` and `get_state` at popup open. Throws `PiRpcError` on timeout or `success: false`.
 
 **`warmUp() → Future<void>`** — one line: `_ensureRunning()`.
 
 **`dispose()`** — before existing cleanup: complete any pending completers with an error so callers don't hang.
 
-**`streamEdit()`** — gains four optional params (`modelProvider`, `modelId`, `modelSupportsThinking`, `thinkingLevel`). Before the existing `new_session` write:
+**`streamEdit()`** — gains three optional params (`modelProvider`, `modelId`, `thinkingLevel = 'off'`). Before `new_session`:
 
 ```dart
 if (modelId != null)
   proc.stdin.writeln(jsonEncode({'type': 'set_model',
       'provider': modelProvider, 'modelId': modelId}));
-if (modelId != null && modelSupportsThinking)
-  proc.stdin.writeln(jsonEncode({'type': 'set_thinking_level',
-      'level': thinkingLevel}));
-// existing: new_session, prompt, flush
+proc.stdin.writeln(jsonEncode({'type': 'set_thinking_level', 'level': thinkingLevel}));
+// always sent — Pi ignores it for non-reasoning models
 ```
 
 `set_model` and `set_thinking_level` failures are **non-fatal**: Pi falls back to its current model/level and the prompt still runs. The error is stored in a `modelSwitchError` local variable and persisted to `_lastModelSwitchError` after `agent_end`. Callers read `lastModelSwitchError` after the stream ends to surface a warning without aborting the edit.
@@ -909,72 +908,55 @@ Five new fields:
 List<Map<String, dynamic>> _availableModels = [];
 bool _modelsLoading = false;
 String? _selectedProvider;
-String? _selectedModelId;   // null = let Pi use its configured default
-String _thinkingLevel = 'medium';
+String? _selectedModelId;   // null = use Pi's current model
+String _thinkingLevel = 'off'; // seeded from Pi's live state on first open
 ```
 
-`_selectedModelInfo` is not cached — derived inline where needed:
+`_normaliseLevel` maps Pi's full level range to the four UI values:
 
 ```dart
-Map<String, dynamic>? get _selectedModelInfo => _availableModels
-    .cast<Map<String, dynamic>?>()
-    .firstWhere((m) => m?['id'] == _selectedModelId, orElse: () => null);
+static String _normaliseLevel(String level) => switch (level) {
+  'low' || 'minimal' => 'low',
+  'medium'           => 'medium',
+  'high' || 'xhigh'  => 'high',
+  _                  => 'off',
+};
 ```
 
-`_openAiPrompt` triggers warm-up + model fetch once (guarded by `_modelsLoading`):
+`_openAiPrompt` runs three parallel calls on first open:
 
 ```dart
-if (_availableModels.isEmpty && !_modelsLoading) {
-  _modelsLoading = true;
-  _piRpcService.warmUp().then((_) {
-    return _piRpcService.sendCommand({'type': 'get_available_models'});
-  }).then((resp) {
-    if (!mounted) return;
-    final models = (resp['data']['models'] as List).cast<Map<String, dynamic>>();
-    setState(() {
-      _availableModels = models;
-      _modelsLoading = false;
-      // Do NOT auto-select — _selectedModelId stays null until the user
-      // explicitly picks. Null = use Pi's current model, no set_model sent.
-    });
-  }).catchError((_) {
-    if (mounted) setState(() => _modelsLoading = false); // silent — submit still works
-  });
-}
+Future.wait<dynamic>([
+  _piRpcService.sendCommand({'type': 'get_available_models'}),
+  _piRpcService.sendCommand({'type': 'get_state'}),
+  PiRpcService.loadEnabledModelPatterns(),
+]).then((results) {
+  // filter models, seed _thinkingLevel via _normaliseLevel(piLevel)
+});
 ```
 
-`_submitAiPrompt` passes the four new params to `streamEdit` and checks `lastModelSwitchError` after the stream ends:
+`_submitAiPrompt` passes three params to `streamEdit` and checks `lastModelSwitchError`:
 
 ```dart
 await for (final chunk in _piRpcService.streamEdit(
-  documentText: docText,
-  editTarget: editTarget,
-  userInstruction: prompt,
-  modelProvider: _selectedProvider,
-  modelId: _selectedModelId,
-  modelSupportsThinking: _selectedModelInfo?['reasoning'] == true,
+  documentText: docText, editTarget: editTarget, userInstruction: prompt,
+  modelProvider: _selectedProvider, modelId: _selectedModelId,
   thinkingLevel: _thinkingLevel,
 )) { ... }
-// Non-fatal model-switch warning (prompt still ran with Pi's current model)
 final switchErr = _piRpcService.lastModelSwitchError;
 if (switchErr != null && mounted) setState(() => _errorBanner = 'Model switch failed: $switchErr');
 ```
 
-`AiPromptPopup` receives one data object + two callbacks instead of seven raw params:
+`AiPromptPopup` receives one data object + two callbacks:
 
 ```dart
 AiPromptPopup(
-  ...
   modelSettings: AiModelSettings(
-    availableModels:      _availableModels,
-    loading:              _modelsLoading,
-    selectedModelId:      _selectedModelId,
-    modelSupportsThinking: _selectedModelInfo?['reasoning'] == true,
-    thinkingLevel:        _thinkingLevel,
+    availableModels: _availableModels, loading: _modelsLoading,
+    selectedModelId: _selectedModelId, thinkingLevel: _thinkingLevel,
   ),
   onModelChanged: (provider, modelId) => setState(() {
-    _selectedProvider = provider;
-    _selectedModelId  = modelId;
+    _selectedProvider = provider; _selectedModelId = modelId;
   }),
   onThinkingLevelChanged: (level) => setState(() => _thinkingLevel = level),
 )
@@ -994,29 +976,24 @@ Footer row added below the `TextField` (only rendered when `modelSettings != nul
 
 ```dart
 const Divider(height: 1),
-SizedBox(
-  height: 32,
-  child: Row(children: [
-    _ModelPicker(settings: widget.modelSettings!, onChanged: widget.onModelChanged),
-    const Spacer(),
-    if (widget.modelSettings!.modelSupportsThinking)
-      _ThinkingPicker(level: widget.modelSettings!.thinkingLevel,
-                      onChanged: widget.onThinkingLevelChanged),
-  ]),
-),
+SizedBox(height: 32, child: Row(children: [
+  _ModelPicker(settings: settings, onChanged: widget.onModelChanged),
+  const Spacer(),
+  _ThinkingPicker(level: settings.thinkingLevel, onChanged: widget.onThinkingLevelChanged),
+])),
 ```
 
 `_ModelPicker`, `_ThinkingPicker`, and `AiModelSettings` are defined at the bottom of `ai_prompt_popup.dart` — all small enough to stay inline, no new files.
 
-`_ThinkingPicker` uses `SegmentedButton<String>` with segments `off · low · medium · high` (displayed as `off · low · med · high`).
+`_ThinkingPicker` is a `DropdownButton<String>` matching `_ModelPicker`'s style. It is shown only when the effective model (selected model, else first visible model) has `reasoning: true`. Items: `Thinking off · Low thinking · Medium thinking · High thinking`.
 
 #### Changes
 
 | File                   | What changes                                                                                                                                                                                                               |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pi_rpc_service.dart`  | Extract `_ensureRunning()`; add `_processLine()` with response routing; add `_pendingCommands` + `_cmdCounter`; add `sendCommand()`; add `warmUp()`; update `dispose()`; add 3 params to `streamEdit()` + event-loop cases |
-| `editor_screen.dart`   | 5 new fields; `_selectedModelInfo` inline getter; `_openAiPrompt` warm-up + model fetch; `_submitAiPrompt` passes model/thinking to `streamEdit`; `AiPromptPopup` gets `AiModelSettings` + 2 callbacks                     |
-| `ai_prompt_popup.dart` | 3 new params; footer `Divider` + `Row`; `AiModelSettings` data class; private `_ModelPicker` and `_ThinkingPicker` widgets                                                                                                 |
+| `pi_rpc_service.dart`  | Extract `_ensureRunning()`; add `_processLine()`, `_pendingCommands`, `_cmdCounter`, `sendCommand()`, `warmUp()`; update `dispose()`; add 3 params to `streamEdit()` (no `modelSupportsThinking`); always send `set_thinking_level` |
+| `editor_screen.dart`   | 5 fields + `_normaliseLevel()`; `_openAiPrompt` 3-parallel fetch + `get_state` seed; `_submitAiPrompt` passes 3 params; `AiPromptPopup` gets `AiModelSettings` (4 fields) + 2 callbacks |
+| `ai_prompt_popup.dart` | 3 new params; `AiModelSettings` (5 fields: includes `selectedProvider`, no `modelSupportsThinking`); footer `Divider` + `Row`; `_ModelPicker` uses provider/id composite keys; `_ThinkingPicker` shown when effective model supports reasoning |
 
 #### Phase 3.9 task checklist
 
@@ -1026,16 +1003,16 @@ SizedBox(
 - [x] `PiRpcService`: add `sendCommand(Map) → Future<Map>` with 5 s timeout
 - [x] `PiRpcService`: add `warmUp() → Future<void>`
 - [x] `PiRpcService`: update `dispose()` — complete pending completers with error before clearing
-- [x] `PiRpcService`: add `modelProvider`, `modelId`, `thinkingLevel` params to `streamEdit()`; write `set_model`/`set_thinking_level` before `new_session`; handle their responses in event loop
-- [x] `EditorScreen`: add `_availableModels`, `_modelsLoading`, `_selectedProvider`, `_selectedModelId`, `_thinkingLevel` fields and `_selectedModelInfo` getter
-- [x] `EditorScreen`: `_openAiPrompt` — trigger warm-up + model fetch (once, guarded by `_modelsLoading`)
-- [x] `EditorScreen`: `_submitAiPrompt` — pass model/thinking params to `streamEdit`
-- [x] `EditorScreen`: pass `AiModelSettings` + 2 callbacks to `AiPromptPopup`
+- [x] `PiRpcService`: add `modelProvider`, `modelId`, `thinkingLevel = 'off'` params to `streamEdit()`; always send `set_thinking_level`; handle responses in event loop
+- [x] `EditorScreen`: add 5 fields + `_normaliseLevel()` static helper
+- [x] `EditorScreen`: `_openAiPrompt` — 3-parallel fetch (`get_available_models` + `get_state` + `loadEnabledModelPatterns`); seed model + thinking level
+- [x] `EditorScreen`: `_submitAiPrompt` — pass 3 params to `streamEdit`; check `lastModelSwitchError`
+- [x] `EditorScreen`: pass `AiModelSettings` (4 fields) + 2 callbacks to `AiPromptPopup`
 - [x] `AiPromptPopup`: add `AiModelSettings` data class
 - [x] `AiPromptPopup`: add `modelSettings`, `onModelChanged`, `onThinkingLevelChanged` parameters
 - [x] `AiPromptPopup`: add footer `Divider` + `Row` below `TextField`
 - [x] `AiPromptPopup`: add private `_ModelPicker` widget (`···` while loading, `DropdownMenu` when loaded)
-- [x] `AiPromptPopup`: add private `_ThinkingPicker` widget (`DropdownButton<String>`, always visible, 4 entries)
+- [x] `AiPromptPopup`: add private `_ThinkingPicker` widget (`DropdownButton<String>`, 4 entries), shown only when effective model supports reasoning
 
 ---
 
@@ -1081,6 +1058,47 @@ Cycle order: `off → low → medium → high → off → …`
 - [x] `_AiPromptPopupState.build()`: pass `onFocusBack: _textFieldFocusNode.requestFocus` to both pickers
 - [x] `Focus.onKeyEvent`: add `Ctrl+P` → cycle model forward (wrap), return `handled`
 - [x] `Focus.onKeyEvent`: add `Shift+Tab` → cycle thinking level forward (wrap), return `handled`
+
+---
+
+### Phase 3.11 — Bug fix: `get_state` seeding + model list regression
+
+**Symptoms:**
+1. Thinking level dropdown was not seeded from Pi's live state on first open — it always started at the hardcoded default.
+2. After adding `get_state` to the fetch, the model list disappeared entirely.
+
+**Root causes:**
+
+1. `get_state` was not called on popup open, so `_thinkingLevel` never reflected Pi's actual state.
+
+2. `get_state` was added to `Future.wait` without error isolation. `Future.wait` fails fast — if `get_state` throws (timeout, Pi not ready, `success: false`), the entire `Future.wait` rejects, `catchError` fires, and `_availableModels` is never populated → model list shows nothing.
+
+**Fixes:**
+
+- Added `get_state` as a second entry in the `Future.wait` inside `_openAiPrompt`, wrapped in `.catchError((_) => <String, dynamic>{})` so a failure returns an empty map rather than rejecting the whole wait. When `get_state` fails the models still load; `_thinkingLevel` stays at its default `'off'`.
+- When `get_state` succeeds, `_thinkingLevel` is seeded via `_normaliseLevel(piLevel)`. If Pi's current model is in the filtered list, `_selectedModelId` and `_selectedProvider` are also seeded.
+- `streamEdit()` `modelSupportsThinking` param removed; `set_thinking_level` always sent (Pi ignores it for non-reasoning models).
+- `_thinkingLevel` default changed from `'medium'` to `'off'`.
+- Thinking visibility moved to **effective-model derivation in popup**: compute the effective model as `selectedProvider/selectedModelId` when present, otherwise first visible model (same fallback as dropdown). Show `_ThinkingPicker` only when that model has `reasoning: true`.
+- `_ModelPicker` switched to provider/id composite keys for stable selection (`provider/modelId`) and to avoid collisions when two providers expose models with the same `id`.
+- `Ctrl+P` cycling also uses the effective model index, so "next" is relative to what the dropdown currently shows even when there is no explicit selection yet.
+- `Shift+Tab` gating uses the same effective-model reasoning check as footer visibility.
+
+#### Changes
+
+| File                   | What changes                                                                                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pi_rpc_service.dart`  | Remove `modelSupportsThinking` param from `streamEdit()`; always send `set_thinking_level`; default `thinkingLevel = 'off'`                                        |
+| `editor_screen.dart`   | Add `get_state` (error-isolated) to `Future.wait`; seed `_thinkingLevel`; seed `_selectedProvider` + `_selectedModelId` when Pi's current model exists in filtered list |
+| `ai_prompt_popup.dart` | Derive effective model from selection/fallback; gate `_ThinkingPicker` + `Shift+Tab` on effective model `reasoning`; switch model picker values to provider/id composite keys |
+
+#### Checklist
+
+- [x] `PiRpcService.streamEdit()`: remove `modelSupportsThinking` param; always send `set_thinking_level`; default `'off'`
+- [x] `EditorScreen`: add `get_state` to `Future.wait` wrapped in `.catchError`; seed `_thinkingLevel`; seed `_selectedProvider` + `_selectedModelId` when available
+- [x] `EditorScreen`: change `_thinkingLevel` default to `'off'`
+- [x] `AiPromptPopup`: derive effective model (`selected model` else `first visible`) and use it for thinking visibility and `Shift+Tab` gating
+- [x] `AiPromptPopup`: use provider/id composite keys in `_ModelPicker`; use effective-model index for `Ctrl+P` next
 
 ---
 

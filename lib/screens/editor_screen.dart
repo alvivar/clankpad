@@ -71,11 +71,15 @@ class _EditorScreenState extends State<EditorScreen> {
   bool _modelsLoading = false;
   String? _selectedProvider;
   String? _selectedModelId; // null = let Pi use its configured default
-  String _thinkingLevel = 'medium';
+  String _thinkingLevel = 'off';
 
-  Map<String, dynamic>? get _selectedModelInfo => _availableModels
-      .cast<Map<String, dynamic>?>()
-      .firstWhere((m) => m?['id'] == _selectedModelId, orElse: () => null);
+  /// Maps Pi's full thinking-level range to the four values shown in the UI.
+  static String _normaliseLevel(String level) => switch (level) {
+    'low' || 'minimal' => 'low',
+    'medium' => 'medium',
+    'high' || 'xhigh' => 'high',
+    _ => 'off', // 'off' and anything unknown
+  };
 
   // ── Convenience ─────────────────────────────────────────────────────────────
 
@@ -244,14 +248,20 @@ class _EditorScreenState extends State<EditorScreen> {
           .then((_) {
             return Future.wait<dynamic>([
               _piRpcService.sendCommand({'type': 'get_available_models'}),
+              // get_state is best-effort — wrap so a failure doesn't poison
+              // the whole Future.wait and leave the model list empty.
+              _piRpcService
+                  .sendCommand({'type': 'get_state'})
+                  .catchError((_) => <String, dynamic>{}),
               PiRpcService.loadEnabledModelPatterns(),
             ]);
           })
           .then((results) {
             if (!mounted) return;
-            final resp = results[0] as Map<String, dynamic>;
-            final patterns = results[1] as List<String>?;
-            final all = (resp['data']['models'] as List)
+            final modelsResp = results[0] as Map<String, dynamic>;
+            final stateResp = results[1] as Map<String, dynamic>;
+            final patterns = results[2] as List<String>?;
+            final all = (modelsResp['data']['models'] as List)
                 .cast<Map<String, dynamic>>();
             // Apply enabledModels filter from ~/.pi/agent/settings.json.
             // Fall back to full list if patterns are null/empty or every
@@ -267,11 +277,28 @@ class _EditorScreenState extends State<EditorScreen> {
                       .toList()
                 : all;
             final models = filtered.isNotEmpty ? filtered : all;
+            // Seed model + thinking level from Pi's live state.
+            final stateData = stateResp['data'] as Map<String, dynamic>?;
+            final piLevel = stateData?['thinkingLevel'] as String? ?? 'off';
+            final piModel = stateData?['model'] as Map<String, dynamic>?;
+            final piModelId = piModel?['id'] as String?;
+            final piProvider = piModel?['provider'] as String?;
+            // Only seed the selection if Pi's current model is in the
+            // (possibly filtered) list — avoids selecting a hidden model.
+            final inList =
+                piModelId != null &&
+                piProvider != null &&
+                models.any(
+                  (m) => m['id'] == piModelId && m['provider'] == piProvider,
+                );
             setState(() {
               _availableModels = models;
               _modelsLoading = false;
-              // Do NOT auto-select — _selectedModelId stays null until the
-              // user explicitly picks. Null = use Pi's current model.
+              _thinkingLevel = _normaliseLevel(piLevel);
+              if (inList) {
+                _selectedModelId = piModelId;
+                _selectedProvider = piProvider;
+              }
             });
           })
           .catchError((_) {
@@ -344,7 +371,6 @@ class _EditorScreenState extends State<EditorScreen> {
         userInstruction: prompt,
         modelProvider: _selectedProvider,
         modelId: _selectedModelId,
-        modelSupportsThinking: _selectedModelInfo?['reasoning'] == true,
         thinkingLevel: _thinkingLevel,
       )) {
         // Exit if the widget was disposed or the user cancelled (which sets
@@ -677,20 +703,13 @@ class _EditorScreenState extends State<EditorScreen> {
                         modelSettings: AiModelSettings(
                           availableModels: _availableModels,
                           loading: _modelsLoading,
+                          selectedProvider: _selectedProvider,
                           selectedModelId: _selectedModelId,
-                          modelSupportsThinking:
-                              _selectedModelInfo?['reasoning'] == true,
                           thinkingLevel: _thinkingLevel,
                         ),
                         onModelChanged: (provider, modelId) => setState(() {
                           _selectedProvider = provider;
                           _selectedModelId = modelId;
-                          // If the newly selected model doesn't support
-                          // reasoning, reset thinking level to avoid sending
-                          // a non-'off' level to a non-reasoning model.
-                          if (_selectedModelInfo?['reasoning'] != true) {
-                            _thinkingLevel = 'medium';
-                          }
                         }),
                         onThinkingLevelChanged: (level) =>
                             setState(() => _thinkingLevel = level),

@@ -6,15 +6,15 @@ import 'package:flutter/services.dart';
 class AiModelSettings {
   final List<Map<String, dynamic>> availableModels;
   final bool loading;
+  final String? selectedProvider;
   final String? selectedModelId;
-  final bool modelSupportsThinking;
   final String thinkingLevel;
 
   const AiModelSettings({
     required this.availableModels,
     required this.loading,
+    required this.selectedProvider,
     required this.selectedModelId,
-    required this.modelSupportsThinking,
     required this.thinkingLevel,
   });
 }
@@ -103,6 +103,10 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final settings = widget.modelSettings;
+    final effectiveModel = settings == null
+        ? null
+        : _effectiveModelForUi(settings);
+    final modelSupportsThinking = effectiveModel?['reasoning'] == true;
 
     return Shortcuts(
       shortcuts: const {
@@ -184,14 +188,13 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                         // Ctrl+P — cycle model forward.
                         if (event.logicalKey == LogicalKeyboardKey.keyP &&
                             HardwareKeyboard.instance.isControlPressed) {
-                          final models =
-                              widget.modelSettings?.availableModels ?? [];
-                          if (models.isNotEmpty) {
-                            final cur = models.indexWhere(
-                              (m) =>
-                                  m['id'] ==
-                                  widget.modelSettings?.selectedModelId,
-                            );
+                          final s = widget.modelSettings;
+                          final models = s?.availableModels ?? const [];
+                          if (s != null && models.isNotEmpty) {
+                            final current = _effectiveModelForUi(s);
+                            final cur = current == null
+                                ? -1
+                                : models.indexOf(current);
                             final next = (cur + 1) % models.length;
                             final m = models[next];
                             widget.onModelChanged?.call(
@@ -202,9 +205,11 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                           return KeyEventResult.handled;
                         }
 
-                        // Shift+Tab — cycle thinking level forward.
+                        // Shift+Tab — cycle thinking level forward (only when
+                        // the effective model supports thinking).
                         if (event.logicalKey == LogicalKeyboardKey.tab &&
-                            HardwareKeyboard.instance.isShiftPressed) {
+                            HardwareKeyboard.instance.isShiftPressed &&
+                            modelSupportsThinking) {
                           const levels = ['off', 'low', 'medium', 'high'];
                           final cur = levels.indexOf(
                             widget.modelSettings?.thinkingLevel ?? 'off',
@@ -262,7 +267,7 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                               onFocusBack: _textFieldFocusNode.requestFocus,
                             ),
                             const Spacer(),
-                            if (settings.modelSupportsThinking)
+                            if (modelSupportsThinking)
                               _ThinkingPicker(
                                 level: settings.thinkingLevel,
                                 onChanged: widget.onThinkingLevelChanged,
@@ -284,6 +289,34 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
 }
 
 // ── Private widgets ───────────────────────────────────────────────────────────
+
+String _modelKey(Map<String, dynamic> model) =>
+    '${model['provider']}/${model['id']}';
+
+Map<String, dynamic>? _effectiveModelForUi(AiModelSettings settings) {
+  if (settings.availableModels.isEmpty) return null;
+
+  // No explicit selection yet: mirror the dropdown's visible fallback.
+  if (settings.selectedModelId == null) return settings.availableModels.first;
+
+  // Prefer exact provider+id match when provider is known.
+  if (settings.selectedProvider != null) {
+    for (final m in settings.availableModels) {
+      if (m['provider'] == settings.selectedProvider &&
+          m['id'] == settings.selectedModelId) {
+        return m;
+      }
+    }
+  }
+
+  // Back-compat fallback for older state that tracked only id.
+  for (final m in settings.availableModels) {
+    if (m['id'] == settings.selectedModelId) return m;
+  }
+
+  // If selected model is missing from the filtered list, fall back to first.
+  return settings.availableModels.first;
+}
 
 class _ModelPicker extends StatelessWidget {
   const _ModelPicker({
@@ -312,28 +345,30 @@ class _ModelPicker extends StatelessWidget {
 
     if (settings.availableModels.isEmpty) return const SizedBox.shrink();
 
-    // Ensure the DropdownButton value is always in the items list.
-    final currentId =
-        settings.selectedModelId ??
-        settings.availableModels.first['id'] as String;
+    // Keep dropdown selection aligned with the same effective model logic used
+    // by the footer and keyboard shortcuts.
+    final currentModel = _effectiveModelForUi(settings)!;
+    final currentKey = _modelKey(currentModel);
 
     return DropdownButton<String>(
-      value: currentId,
+      value: currentKey,
       isDense: true,
       underline: const SizedBox.shrink(),
       style: TextStyle(fontSize: 12, color: colorScheme.onSurface),
       items: settings.availableModels.map((m) {
         return DropdownMenuItem<String>(
-          value: m['id'] as String,
+          value: _modelKey(m),
           child: Text(
             '${m['provider']}  ·  ${m['name'] as String? ?? m['id'] as String}',
           ),
         );
       }).toList(),
-      onChanged: (id) {
-        if (id == null) return;
-        final m = settings.availableModels.firstWhere((m) => m['id'] == id);
-        onChanged?.call(m['provider'] as String, id);
+      onChanged: (key) {
+        if (key == null) return;
+        final m = settings.availableModels.firstWhere(
+          (m) => _modelKey(m) == key,
+        );
+        onChanged?.call(m['provider'] as String, m['id'] as String);
         onFocusBack?.call();
       },
     );

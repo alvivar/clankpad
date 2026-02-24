@@ -82,7 +82,8 @@ class PiRpcService {
   /// on subsequent calls. Yields text chunks as they arrive.
   ///
   /// When [modelId] is non-null, `set_model` is sent before `new_session`.
-  /// When [modelSupportsThinking] is true, `set_thinking_level` is also sent.
+  /// `set_thinking_level` is always sent — Pi ignores it for non-reasoning
+  /// models, so no guard is needed here.
   ///
   /// Completes normally when `agent_end` is received — including after [abort].
   /// Throws [PiRpcError] on process launch failure or unrecoverable model error.
@@ -92,8 +93,7 @@ class PiRpcService {
     required String userInstruction,
     String? modelProvider,
     String? modelId,
-    bool modelSupportsThinking = false,
-    String thinkingLevel = 'medium',
+    String thinkingLevel = 'off',
   }) async* {
     _lastModelSwitchError = null; // clear from any previous call
     await _ensureRunning();
@@ -113,11 +113,9 @@ class PiRpcService {
         }),
       );
     }
-    if (modelId != null && modelSupportsThinking) {
-      _process!.stdin.writeln(
-        jsonEncode({'type': 'set_thinking_level', 'level': thinkingLevel}),
-      );
-    }
+    _process!.stdin.writeln(
+      jsonEncode({'type': 'set_thinking_level', 'level': thinkingLevel}),
+    );
     _process!.stdin.writeln(jsonEncode({'type': 'new_session'}));
     _process!.stdin.writeln(
       jsonEncode({
