@@ -8,6 +8,9 @@ A minimalist, distraction-free text editor with multi-tab support and inline AI 
 
 - [Flutter SDK](https://docs.flutter.dev/get-started/install) (Dart SDK ^3.11.0)
 - Windows (primary target; Linux/macOS may work but are untested)
+- _(Optional, for AI features)_ [Node.js](https://nodejs.org/) + [Pi coding agent](https://www.npmjs.com/package/@mariozechner/pi-coding-agent)
+    - Install: `npm install -g @mariozechner/pi-coding-agent`
+    - Authenticate/configure once (e.g. run `pi /login`)
 
 ---
 
@@ -103,7 +106,7 @@ Clankpad never loses your work. Every change is saved to a session file automati
 
 - **Auto-save** — the session is saved to disk 500 ms after your last change (debounced), so continuous typing never hammers the disk.
 - **On close** — any pending save is flushed synchronously before the app exits.
-- **On reopen** — all tabs are restored exactly as you left them: content, file paths, cursor state, and which tab was active.
+- **On reopen** — all tabs are restored exactly as you left them: content, file paths, and which tab was active.
 
 **What gets restored:**
 
@@ -122,7 +125,18 @@ Clankpad never loses your work. Every change is saved to a session file automati
 
 ### Inline AI Edit (`Ctrl+K`)
 
-A floating prompt popup for AI-assisted text editing.
+A floating prompt popup for AI-assisted text editing, powered by **Pi** (`pi --mode rpc`).
+
+Clankpad does **not** talk to model APIs directly and stores no API keys. Pi owns auth + model configuration. For safety, Pi is launched with tools disabled (text-only) — it only sees the current document text and your selected edit target.
+
+**AI setup (optional):**
+
+```bash
+npm install -g @mariozechner/pi-coding-agent
+pi /login
+```
+
+If Pi isn't available (not installed or not on `PATH`), `Ctrl+K` will show a dismissible error banner and the editor remains usable.
 
 **How to use:**
 
@@ -133,34 +147,60 @@ A floating prompt popup for AI-assisted text editing.
 
 **Inside the popup:**
 
-| Key           | Action                                   |
-| ------------- | ---------------------------------------- |
-| `Enter`       | Submit the prompt                        |
-| `Shift+Enter` | Insert a newline in the prompt           |
-| `Escape`      | Dismiss the popup without making changes |
+| Key           | Action                                                                            |
+| ------------- | --------------------------------------------------------------------------------- |
+| `Enter`       | Submit the prompt                                                                 |
+| `Shift+Enter` | Insert a newline in the prompt                                                    |
+| `Escape`      | Dismiss the popup without making changes                                          |
+| `↑` / `↓`     | Browse prompt history (cursor must be on the first / last line)                   |
+| `Ctrl+P`      | Cycle the model (when the model list is loaded)                                   |
+| `Shift+Tab`   | Cycle thinking level (off → low → medium → high; only shown for reasoning models) |
 
-**While the AI request is in-flight**, the editor is locked (read-only) and a progress indicator appears below the tab bar.
+**Model & thinking level:** the popup footer lets you pick an AI model and (for reasoning-capable models) a thinking level. The model list comes from Pi and can be filtered via Pi's `enabledModels` setting (`~/.pi/agent/settings.json`). Model/thinking selection and prompt history are kept in-memory for the current app run.
 
-**Reviewing the result** — after the AI responds, the change is shown as an inline diff:
+**While the AI request is running**, the editor is locked (read-only). Before the first tokens arrive, a thin progress bar appears below the tab bar with **Cancel (Esc)**.
 
-- Old text is shown struck through in red; new text in green.
+**Reviewing the result** — the response streams into a “Before / After” diff card:
+
 - Press `Tab` or `Ctrl+Enter` to **accept** the change.
 - Press `Escape` to **reject** and keep the original.
 
+The editor stays read-only until you accept or reject.
+
 ---
 
-## Keyboard Shortcuts Reference
+## Keyboard Shortcuts
 
-| Shortcut             | Action                         |
-| -------------------- | ------------------------------ |
-| `Ctrl+N`             | New tab                        |
-| `Ctrl+W`             | Close active tab               |
-| `Ctrl+O`             | Open file                      |
-| `Ctrl+S`             | Save                           |
-| `Ctrl+Shift+S`       | Save As                        |
-| `Ctrl+K`             | Open AI inline edit popup      |
-| `Tab` / `Ctrl+Enter` | Accept AI diff                 |
-| `Escape`             | Reject AI diff / dismiss popup |
+### Global
+
+| Shortcut       | Action           |
+| -------------- | ---------------- |
+| `Ctrl+N`       | New tab          |
+| `Ctrl+W`       | Close active tab |
+| `Ctrl+O`       | Open file        |
+| `Ctrl+S`       | Save             |
+| `Ctrl+Shift+S` | Save As          |
+| `Ctrl+K`       | AI inline edit   |
+
+### Ctrl+K prompt popup
+
+| Key           | Action                                           |
+| ------------- | ------------------------------------------------ |
+| `Enter`       | Submit prompt                                    |
+| `Shift+Enter` | Insert newline                                   |
+| `Escape`      | Dismiss popup                                    |
+| `↑` / `↓`     | Prompt history (first / last line only)          |
+| `Ctrl+P`      | Cycle model                                      |
+| `Shift+Tab`   | Cycle thinking level (off → low → medium → high) |
+
+### AI diff review
+
+| Key                  | Action         |
+| -------------------- | -------------- |
+| `Tab` / `Ctrl+Enter` | Accept AI edit |
+| `Escape`             | Reject AI edit |
+
+> While the progress stripe is visible (before the diff opens), `Escape` cancels the in-flight request.
 
 ---
 
@@ -169,7 +209,7 @@ A floating prompt popup for AI-assisted text editing.
 The session is stored at:
 
 ```
-%APPDATA%\clankpad\session.json
+%APPDATA%\Clankpad\session.json
 ```
 
 You can delete this file to reset the session (all tabs will be lost).
