@@ -9,7 +9,7 @@ import '../models/intents.dart';
 import '../services/pi_rpc_service.dart';
 import '../state/editor_state.dart';
 import '../widgets/ai_diff_view.dart';
-import '../widgets/ai_prompt_popup.dart';
+import '../widgets/ai_prompt_popup.dart' show AiModelSettings, AiPromptPopup;
 import '../widgets/editor_area.dart';
 import '../widgets/editor_tab_bar.dart';
 
@@ -64,6 +64,18 @@ class _EditorScreenState extends State<EditorScreen> {
   // Owned as a field so the process is killed if the screen is disposed while
   // a request is in-flight.
   final _piRpcService = PiRpcService();
+
+  // ── Model / thinking state (session-only) ───────────────────────────────────
+
+  List<Map<String, dynamic>> _availableModels = [];
+  bool _modelsLoading = false;
+  String? _selectedProvider;
+  String? _selectedModelId; // null = let Pi use its configured default
+  String _thinkingLevel = 'medium';
+
+  Map<String, dynamic>? get _selectedModelInfo => _availableModels
+      .cast<Map<String, dynamic>?>()
+      .firstWhere((m) => m?['id'] == _selectedModelId, orElse: () => null);
 
   // ── Convenience ─────────────────────────────────────────────────────────────
 
@@ -222,6 +234,31 @@ class _EditorScreenState extends State<EditorScreen> {
       _snapshotSelection = controller.selection;
       _aiPromptVisible = true;
     });
+
+    // Pre-warm Pi and fetch the model list once per session. Runs concurrently
+    // with the user typing their prompt — silent on error (submit still works).
+    if (_availableModels.isEmpty && !_modelsLoading) {
+      _modelsLoading = true;
+      _piRpcService
+          .warmUp()
+          .then((_) {
+            return _piRpcService.sendCommand({'type': 'get_available_models'});
+          })
+          .then((resp) {
+            if (!mounted) return;
+            final models = (resp['data']['models'] as List)
+                .cast<Map<String, dynamic>>();
+            setState(() {
+              _availableModels = models;
+              _modelsLoading = false;
+              // Do NOT auto-select — _selectedModelId stays null until the
+              // user explicitly picks. Null = use Pi's current model.
+            });
+          })
+          .catchError((_) {
+            if (mounted) setState(() => _modelsLoading = false);
+          });
+    }
   }
 
   // ── Prompt history ───────────────────────────────────────────────────────────
@@ -286,6 +323,10 @@ class _EditorScreenState extends State<EditorScreen> {
         documentText: docText,
         editTarget: editTarget,
         userInstruction: prompt,
+        modelProvider: _selectedProvider,
+        modelId: _selectedModelId,
+        modelSupportsThinking: _selectedModelInfo?['reasoning'] == true,
+        thinkingLevel: _thinkingLevel,
       )) {
         // Exit if the widget was disposed or the user cancelled (which sets
         // _editorReadOnly = false) before the diff was opened.
@@ -306,6 +347,12 @@ class _EditorScreenState extends State<EditorScreen> {
           // Subsequent chunks: append to the live "After" pane.
           setState(() => _diffProposed += chunk);
         }
+      }
+      // Stream completed normally. Surface a non-fatal model-switch warning
+      // if Pi rejected set_model / set_thinking_level (prompt still ran).
+      final switchErr = _piRpcService.lastModelSwitchError;
+      if (switchErr != null && mounted) {
+        setState(() => _errorBanner = 'Model switch failed: $switchErr');
       }
     } on PiRpcError catch (e) {
       if (!mounted) return;
@@ -608,6 +655,26 @@ class _EditorScreenState extends State<EditorScreen> {
                         onSubmit: _submitAiPrompt,
                         onHistoryUp: _historyUp,
                         onHistoryDown: _historyDown,
+                        modelSettings: AiModelSettings(
+                          availableModels: _availableModels,
+                          loading: _modelsLoading,
+                          selectedModelId: _selectedModelId,
+                          modelSupportsThinking:
+                              _selectedModelInfo?['reasoning'] == true,
+                          thinkingLevel: _thinkingLevel,
+                        ),
+                        onModelChanged: (provider, modelId) => setState(() {
+                          _selectedProvider = provider;
+                          _selectedModelId = modelId;
+                          // If the newly selected model doesn't support
+                          // reasoning, reset thinking level to avoid sending
+                          // a non-'off' level to a non-reasoning model.
+                          if (_selectedModelInfo?['reasoning'] != true) {
+                            _thinkingLevel = 'medium';
+                          }
+                        }),
+                        onThinkingLevelChanged: (level) =>
+                            setState(() => _thinkingLevel = level),
                       ),
 
                     if (_diffVisible)

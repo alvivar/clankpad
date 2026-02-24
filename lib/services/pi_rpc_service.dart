@@ -13,10 +13,9 @@ class PiRpcError implements Exception {
 
 /// Drives Pi's RPC subprocess (`pi --mode rpc`) for AI-assisted text editing.
 ///
-/// Pi is spawned on the first [streamEdit] call and kept alive between
-/// invocations. Each call sends `new_session` + `prompt` back-to-back to
-/// reset Pi's in-memory conversation history before each edit. Pi owns all
-/// auth and model configuration — Clankpad has no API key management.
+/// Pi is spawned on the first [warmUp] or [streamEdit] call and kept alive
+/// between invocations. Pi owns all auth and model configuration — Clankpad
+/// has no API key management.
 class PiRpcService {
   PiRpcService({this.piExecutable = 'pi'});
 
@@ -30,13 +29,60 @@ class PiRpcService {
   StreamSubscription<String>? _stdoutSub;
 
   // Per-invocation sink. Created at the start of streamEdit, closed in finally.
-  // _stdoutSub writes to it; streamEdit reads from it.
   StreamController<String>? _lineController;
+
+  // For sendCommand — used only for get_available_models at popup open.
+  // _pendingCommands is always empty during active streaming.
+  int _cmdCounter = 0;
+  final Map<String, Completer<Map<String, dynamic>>> _pendingCommands = {};
+
+  // Set when set_model or set_thinking_level returns success: false.
+  // Cleared at the start of each streamEdit call. Callers read this after
+  // the stream ends to surface a non-fatal warning.
+  String? _lastModelSwitchError;
+
+  /// Non-null after a streamEdit call if set_model or set_thinking_level
+  /// was rejected by Pi. The prompt still ran with Pi's current model.
+  String? get lastModelSwitchError => _lastModelSwitchError;
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
+  /// Pre-warms the Pi process in the background. Called when the Ctrl+K popup
+  /// opens so the process is ready before the user submits.
+  Future<void> warmUp() => _ensureRunning();
+
+  /// Sends a command with a unique `id` and awaits its `response` event.
+  ///
+  /// Used only for out-of-band queries (e.g. `get_available_models`) that need
+  /// data back before streaming starts. Throws [PiRpcError] on timeout (5 s)
+  /// or `success: false`.
+  Future<Map<String, dynamic>> sendCommand(Map<String, dynamic> cmd) async {
+    await _ensureRunning();
+    final id = 'c${_cmdCounter++}';
+    final completer = Completer<Map<String, dynamic>>();
+    _pendingCommands[id] = completer;
+    _process!.stdin.writeln(jsonEncode({...cmd, 'id': id}));
+    await _process!.stdin.flush();
+    final response = await completer.future.timeout(
+      const Duration(seconds: 5),
+      onTimeout: () {
+        _pendingCommands.remove(id);
+        throw PiRpcError("Command timed out: ${cmd['type']}");
+      },
+    );
+    if (response['success'] == false) {
+      throw PiRpcError(
+        response['error'] as String? ?? "Command failed: ${cmd['type']}",
+      );
+    }
+    return response;
+  }
+
   /// Spawns Pi on the first call (or after a crash), reuses the warm process
   /// on subsequent calls. Yields text chunks as they arrive.
+  ///
+  /// When [modelId] is non-null, `set_model` is sent before `new_session`.
+  /// When [modelSupportsThinking] is true, `set_thinking_level` is also sent.
   ///
   /// Completes normally when `agent_end` is received — including after [abort].
   /// Throws [PiRpcError] on process launch failure or unrecoverable model error.
@@ -44,34 +90,46 @@ class PiRpcService {
     required String documentText,
     required String editTarget,
     required String userInstruction,
+    String? modelProvider,
+    String? modelId,
+    bool modelSupportsThinking = false,
+    String thinkingLevel = 'medium',
   }) async* {
-    // ── Ensure warm process ────────────────────────────────────────────────────
-
-    if (_process == null) {
-      await _spawn(); // throws PiRpcError if pi not found
-    }
-
-    // ── Per-invocation line controller ────────────────────────────────────────
+    _lastModelSwitchError = null; // clear from any previous call
+    await _ensureRunning();
 
     final controller = StreamController<String>();
     _lineController = controller;
+    String? modelSwitchError;
 
-    // ── Send new_session + prompt (back-to-back, one flush) ──────────────────
-    //
-    // new_session clears Pi's in-memory conversation history so each edit is
-    // independent. Its acknowledgement arrives as type=="response" and is
-    // silently ignored by the event loop below (same as the abort ack).
-
-    final message = _buildPromptMessage(
-      documentText,
-      editTarget,
-      userInstruction,
-    );
+    // Send all commands in one flush:
+    //   [set_model] → [set_thinking_level] → new_session → prompt
+    if (modelId != null) {
+      _process!.stdin.writeln(
+        jsonEncode({
+          'type': 'set_model',
+          'provider': modelProvider,
+          'modelId': modelId,
+        }),
+      );
+    }
+    if (modelId != null && modelSupportsThinking) {
+      _process!.stdin.writeln(
+        jsonEncode({'type': 'set_thinking_level', 'level': thinkingLevel}),
+      );
+    }
     _process!.stdin.writeln(jsonEncode({'type': 'new_session'}));
-    _process!.stdin.writeln(jsonEncode({'type': 'prompt', 'message': message}));
+    _process!.stdin.writeln(
+      jsonEncode({
+        'type': 'prompt',
+        'message': _buildPromptMessage(
+          documentText,
+          editTarget,
+          userInstruction,
+        ),
+      }),
+    );
     await _process!.stdin.flush();
-
-    // ── Stream events ─────────────────────────────────────────────────────────
 
     bool agentEndReceived = false;
 
@@ -83,14 +141,25 @@ class PiRpcService {
         try {
           event = jsonDecode(line) as Map<String, dynamic>;
         } catch (_) {
-          continue; // skip malformed lines
+          continue;
         }
 
         final type = event['type'] as String?;
 
-        // Response acks (new_session, abort, prompt success) arrive here.
-        // Only act on a failing prompt ack; everything else is ignored.
+        // Response acks — id-tagged ones never reach here (routed by
+        // _processLine to _pendingCommands). Check success on the ones
+        // that matter; silently skip the rest (new_session, abort).
         if (type == 'response') {
+          // set_model / set_thinking_level failures are non-fatal: Pi falls
+          // back to its current model/level and the prompt still runs.
+          if (event['command'] == 'set_model' && event['success'] != true) {
+            modelSwitchError = event['error'] as String? ?? 'set_model failed';
+          }
+          if (event['command'] == 'set_thinking_level' &&
+              event['success'] != true) {
+            modelSwitchError ??=
+                event['error'] as String? ?? 'set_thinking_level failed';
+          }
           if (event['command'] == 'prompt' && event['success'] != true) {
             throw const PiRpcError(
               'Pi process exited unexpectedly — try again.',
@@ -99,7 +168,7 @@ class PiRpcService {
           continue;
         }
 
-        // Token chunk
+        // Token chunk.
         if (type == 'message_update') {
           final ame = event['assistantMessageEvent'] as Map<String, dynamic>?;
           if (ame?['type'] == 'text_delta') {
@@ -111,29 +180,26 @@ class PiRpcService {
           continue;
         }
 
-        // Clean completion — process stays warm
+        // Clean completion — process stays warm.
         if (type == 'agent_end') {
           agentEndReceived = true;
           break;
         }
 
-        // All retries exhausted
+        // All retries exhausted.
         if (type == 'auto_retry_end' && event['success'] == false) {
           throw const PiRpcError('Pi process exited unexpectedly — try again.');
         }
-
-        // All other events (turn_start, message_start, thinking_delta, etc.)
-        // are silently ignored.
       }
     } finally {
       _lineController = null;
       if (!controller.isClosed) await controller.close();
-      // Kill Pi only on error/unexpected-exit paths. On success and after
-      // abort Pi emits agent_end (agentEndReceived = true) — stay warm.
       if (!agentEndReceived) {
         await _killProcess();
       }
     }
+
+    _lastModelSwitchError = modelSwitchError;
 
     if (!agentEndReceived) {
       throw const PiRpcError('Pi process exited unexpectedly — try again.');
@@ -150,13 +216,17 @@ class PiRpcService {
     try {
       proc.stdin.writeln(jsonEncode({'type': 'abort'}));
       proc.stdin.flush().ignore();
-    } catch (_) {
-      // stdin may already be closed; nothing to do.
-    }
+    } catch (_) {}
   }
 
-  /// Cancels the stdout subscription, closes the line controller, kills Pi.
+  /// Cancels the stdout subscription, completes pending commands with an error,
+  /// and kills Pi.
   Future<void> dispose() async {
+    for (final c in _pendingCommands.values) {
+      c.completeError(const PiRpcError('Service disposed'));
+    }
+    _pendingCommands.clear();
+
     final c = _lineController;
     _lineController = null;
     if (c != null && !c.isClosed) await c.close();
@@ -165,7 +235,10 @@ class PiRpcService {
 
   // ── Internals ───────────────────────────────────────────────────────────────
 
-  Future<void> _spawn() async {
+  /// Spawns Pi if it is not already running; returns immediately if warm.
+  Future<void> _ensureRunning() async {
+    if (_process != null) return;
+
     final Process proc;
     try {
       proc = await Process.start(
@@ -192,32 +265,50 @@ class PiRpcService {
 
     _process = proc;
 
-    // Drain stderr so the pipe never blocks the child process.
     proc.stderr
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((_) {});
 
-    // Persistent subscription: forwards every stdout line to the active
-    // per-invocation controller. Survives across streamEdit calls.
     _stdoutSub = proc.stdout
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen(
-          (line) => _lineController?.add(line),
+          _processLine,
           onDone: _onProcessExit,
           onError: (_) => _onProcessExit(),
         );
   }
 
-  /// Called when Pi's stdout closes — either because Pi exited unexpectedly
-  /// or (if somehow reached) after explicit process termination.
+  /// Routes each stdout line: id-tagged `response` events go to the matching
+  /// [Completer] in [_pendingCommands]; everything else forwards to
+  /// [_lineController]. During active streaming, [_pendingCommands] is always
+  /// empty so the routing branch is a constant-time no-op.
+  void _processLine(String line) {
+    final Map<String, dynamic> event;
+    try {
+      event = jsonDecode(line) as Map<String, dynamic>;
+    } catch (_) {
+      _lineController?.add(line);
+      return;
+    }
+    if (event['type'] == 'response' && event['id'] is String) {
+      _pendingCommands.remove(event['id'] as String)?.complete(event);
+      return; // do NOT forward to _lineController
+    }
+    _lineController?.add(line);
+  }
+
+  /// Called when Pi's stdout closes — either an unexpected exit or after
+  /// explicit termination.
   void _onProcessExit() {
     _process = null;
     _stdoutSub = null;
-    // Close the active controller so the await for in streamEdit exits and
-    // the error path (kill + throw PiRpcError) runs. No-op if already closed
-    // or if called between invocations (controller is null).
+    // Complete any in-flight sendCommand calls with an error.
+    for (final c in _pendingCommands.values) {
+      c.completeError(const PiRpcError('Pi process exited unexpectedly.'));
+    }
+    _pendingCommands.clear();
     final c = _lineController;
     _lineController = null;
     if (c != null && !c.isClosed) c.close();
@@ -229,7 +320,7 @@ class PiRpcService {
     final proc = _process;
     if (proc == null) return;
     _process = null;
-    proc.kill(); // synchronous — Pi is signalled immediately, before any awaits
+    proc.kill();
     await _stdoutSub?.cancel();
     _stdoutSub = null;
     try {
