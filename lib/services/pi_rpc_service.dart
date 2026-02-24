@@ -330,6 +330,41 @@ class PiRpcService {
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
+  // ── enabledModels filtering ─────────────────────────────────────────────────
+
+  /// Reads `~/.pi/agent/settings.json` and returns the `enabledModels` list,
+  /// or `null` if the file is absent, malformed, or the key is missing/empty.
+  /// Never throws — callers treat `null` as "show all models".
+  static Future<List<String>?> loadEnabledModelPatterns() async {
+    try {
+      final home =
+          Platform.environment['USERPROFILE'] ?? // Windows
+          Platform.environment['HOME']; // macOS / Linux
+      if (home == null) return null;
+      final file = File('$home/.pi/agent/settings.json');
+      if (!await file.exists()) return null;
+      final json =
+          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final raw = json['enabledModels'];
+      if (raw is! List || raw.isEmpty) return null;
+      return raw.cast<String>();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Returns `true` if [modelId] matches any of [patterns].
+  /// Glob rules: `*` matches any sequence of characters; everything else is
+  /// treated as a literal (including `/`).
+  static bool matchesEnabledPattern(String modelId, List<String> patterns) {
+    for (final pattern in patterns) {
+      // Split on '*', escape each literal segment, rejoin with '.*'.
+      final segments = pattern.split('*').map(RegExp.escape).join('.*');
+      if (RegExp('^$segments\$').hasMatch(modelId)) return true;
+    }
+    return false;
+  }
+
   static String _buildPromptMessage(
     String documentText,
     String editTarget,

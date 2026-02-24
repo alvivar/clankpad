@@ -242,12 +242,31 @@ class _EditorScreenState extends State<EditorScreen> {
       _piRpcService
           .warmUp()
           .then((_) {
-            return _piRpcService.sendCommand({'type': 'get_available_models'});
+            return Future.wait<dynamic>([
+              _piRpcService.sendCommand({'type': 'get_available_models'}),
+              PiRpcService.loadEnabledModelPatterns(),
+            ]);
           })
-          .then((resp) {
+          .then((results) {
             if (!mounted) return;
-            final models = (resp['data']['models'] as List)
+            final resp = results[0] as Map<String, dynamic>;
+            final patterns = results[1] as List<String>?;
+            final all = (resp['data']['models'] as List)
                 .cast<Map<String, dynamic>>();
+            // Apply enabledModels filter from ~/.pi/agent/settings.json.
+            // Fall back to full list if patterns are null/empty or every
+            // model is excluded (avoids a blank dropdown on bad config).
+            final filtered = (patterns != null && patterns.isNotEmpty)
+                ? all
+                      .where(
+                        (m) => PiRpcService.matchesEnabledPattern(
+                          '${m['provider']}/${m['id']}',
+                          patterns,
+                        ),
+                      )
+                      .toList()
+                : all;
+            final models = filtered.isNotEmpty ? filtered : all;
             setState(() {
               _availableModels = models;
               _modelsLoading = false;
