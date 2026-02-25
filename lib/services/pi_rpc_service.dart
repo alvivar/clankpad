@@ -94,6 +94,7 @@ class PiRpcService {
     String? modelProvider,
     String? modelId,
     String thinkingLevel = 'off',
+    int? insertOffset,
   }) async* {
     _lastModelSwitchError = null; // clear from any previous call
     await _ensureRunning();
@@ -124,6 +125,7 @@ class PiRpcService {
           documentText,
           editTarget,
           userInstruction,
+          insertOffset: insertOffset,
         ),
       }),
     );
@@ -366,16 +368,32 @@ class PiRpcService {
   static String _buildPromptMessage(
     String documentText,
     String editTarget,
-    String userInstruction,
-  ) =>
-      'Document context:\n'
-      '$documentText\n'
-      '\n'
-      'Edit target:\n'
-      '$editTarget\n'
-      '\n'
-      'Instruction: $userInstruction\n'
-      '\n'
-      'IMPORTANT: Reply with ONLY the transformed text. '
-      'No explanations, no preamble.';
+    String userInstruction, {
+    int? insertOffset,
+  }) {
+    if (editTarget.isEmpty) {
+      // Insert mode: embed a [CURSOR] marker so the model sees the full
+      // document as a coherent whole with a precise insertion point.
+      final offset = insertOffset ?? documentText.length;
+      final before = documentText.substring(0, offset);
+      final after = documentText.substring(offset);
+      return 'Document:\n'
+          '$before[CURSOR]$after\n'
+          '\n'
+          'Instruction: $userInstruction\n'
+          '\n'
+          'IMPORTANT: Reply with ONLY the text to insert at [CURSOR]. '
+          'Do not include surrounding blank lines. No explanations, no preamble.';
+    }
+    return 'Document context:\n'
+        '$documentText\n'
+        '\n'
+        'Edit target:\n'
+        '$editTarget\n'
+        '\n'
+        'Instruction: $userInstruction\n'
+        '\n'
+        'IMPORTANT: Reply with ONLY the transformed text. '
+        'No explanations, no preamble.';
+  }
 }

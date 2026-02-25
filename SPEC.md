@@ -114,8 +114,9 @@ A lightweight inline prompt popup, inspired by Cursor's inline edit feature.
 
 **Trigger:**
 
-- `Ctrl+K` with text selected → opens the popup; the selected text is the **edit target**.
-- `Ctrl+K` with no selection → the entire document content is treated as the edit target (equivalent to selecting all).
+- `Ctrl+K` with text selected → opens the popup in **edit mode**; the selected text is the **edit target**; the AI output replaces it.
+- `Ctrl+K` with no selection on a **non-blank line** → the surrounding paragraph is auto-selected → edit mode (same as a manual selection of that paragraph).
+- `Ctrl+K` with no selection on a **blank line** → opens the popup in **insert mode**; the AI output is **inserted at the cursor position**.
 
 **Popup behavior:**
 
@@ -153,15 +154,15 @@ Shortcuts(
 **Snapshot on popup open.** When the popup opens, immediately capture and freeze:
 
 - `documentText` — full text of the active tab at that moment.
-- `editTarget` — the selected substring, or full text if nothing is selected.
+- `editTarget` — the selected substring, or empty string in insert mode.
 - `selectionRange` — the `TextSelection` from the controller.
 
 These values are passed to the AI request unchanged. They do not update if the user types while the popup is open.
 
 **AI context:**
 
-- The AI receives `documentText` as context and `editTarget` as the text to transform.
-- The edit instruction is applied only to `editTarget`.
+- **Edit mode** (selection exists): the AI receives `documentText` as context and `editTarget` as the text to transform. The output replaces `editTarget`.
+- **Insert mode** (no selection, blank line): the AI receives the full document with a `[CURSOR]` marker embedded at the insertion point. The model sees the document as a coherent whole and is instructed to reply with only the text to insert — without surrounding blank lines. On accept, the editor wraps the (trimmed) result with `\n…\n`, producing a blank-line separation from both the preceding and following paragraphs.
 
 **Editing locked during request.** While the AI request is in-flight, the editor `TextField` is set to `readOnly: true`. A thin linear progress indicator appears below the tab bar. On response (success or error), `readOnly` is restored. Drift detection (applying results against a changed document) is explicitly out of scope — locking is simpler and requests are short.
 
@@ -989,10 +990,10 @@ SizedBox(height: 32, child: Row(children: [
 
 #### Changes
 
-| File                   | What changes                                                                                                                                                                                                               |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pi_rpc_service.dart`  | Extract `_ensureRunning()`; add `_processLine()`, `_pendingCommands`, `_cmdCounter`, `sendCommand()`, `warmUp()`; update `dispose()`; add 3 params to `streamEdit()` (no `modelSupportsThinking`); always send `set_thinking_level` |
-| `editor_screen.dart`   | 5 fields + `_normaliseLevel()`; `_openAiPrompt` 3-parallel fetch + `get_state` seed; `_submitAiPrompt` passes 3 params; `AiPromptPopup` gets `AiModelSettings` (4 fields) + 2 callbacks |
+| File                   | What changes                                                                                                                                                                                                                                   |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pi_rpc_service.dart`  | Extract `_ensureRunning()`; add `_processLine()`, `_pendingCommands`, `_cmdCounter`, `sendCommand()`, `warmUp()`; update `dispose()`; add 3 params to `streamEdit()` (no `modelSupportsThinking`); always send `set_thinking_level`            |
+| `editor_screen.dart`   | 5 fields + `_normaliseLevel()`; `_openAiPrompt` 3-parallel fetch + `get_state` seed; `_submitAiPrompt` passes 3 params; `AiPromptPopup` gets `AiModelSettings` (4 fields) + 2 callbacks                                                        |
 | `ai_prompt_popup.dart` | 3 new params; `AiModelSettings` (5 fields: includes `selectedProvider`, no `modelSupportsThinking`); footer `Divider` + `Row`; `_ModelPicker` uses provider/id composite keys; `_ThinkingPicker` shown when effective model supports reasoning |
 
 #### Phase 3.9 task checklist
@@ -1047,8 +1048,8 @@ Cycle order: `off → low → medium → high → off → …`
 
 #### Changes
 
-| File                   | What changes                                                                                                                             |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| File                   | What changes                                                                                                                            |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `ai_prompt_popup.dart` | `_ModelPicker` + `_ThinkingPicker` gain `onFocusBack`; `_AiPromptPopupState` passes it; `Focus.onKeyEvent` gains `Ctrl+P` + `Shift+Tab` |
 
 #### Phase 3.10 task checklist
@@ -1064,6 +1065,7 @@ Cycle order: `off → low → medium → high → off → …`
 ### Phase 3.11 — Bug fix: `get_state` seeding + model list regression
 
 **Symptoms:**
+
 1. Thinking level dropdown was not seeded from Pi's live state on first open — it always started at the hardcoded default.
 2. After adding `get_state` to the fetch, the model list disappeared entirely.
 
@@ -1086,10 +1088,10 @@ Cycle order: `off → low → medium → high → off → …`
 
 #### Changes
 
-| File                   | What changes                                                                                                                                                       |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `pi_rpc_service.dart`  | Remove `modelSupportsThinking` param from `streamEdit()`; always send `set_thinking_level`; default `thinkingLevel = 'off'`                                        |
-| `editor_screen.dart`   | Add `get_state` (error-isolated) to `Future.wait`; seed `_thinkingLevel`; seed `_selectedProvider` + `_selectedModelId` when Pi's current model exists in filtered list |
+| File                   | What changes                                                                                                                                                                  |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pi_rpc_service.dart`  | Remove `modelSupportsThinking` param from `streamEdit()`; always send `set_thinking_level`; default `thinkingLevel = 'off'`                                                   |
+| `editor_screen.dart`   | Add `get_state` (error-isolated) to `Future.wait`; seed `_thinkingLevel`; seed `_selectedProvider` + `_selectedModelId` when Pi's current model exists in filtered list       |
 | `ai_prompt_popup.dart` | Derive effective model from selection/fallback; gate `_ThinkingPicker` + `Shift+Tab` on effective model `reasoning`; switch model picker values to provider/id composite keys |
 
 #### Checklist
@@ -1099,6 +1101,59 @@ Cycle order: `off → low → medium → high → off → …`
 - [x] `EditorScreen`: change `_thinkingLevel` default to `'off'`
 - [x] `AiPromptPopup`: derive effective model (`selected model` else `first visible`) and use it for thinking visibility and `Shift+Tab` gating
 - [x] `AiPromptPopup`: use provider/id composite keys in `_ModelPicker`; use effective-model index for `Ctrl+P` next
+
+---
+
+### Phase 3.12 — Insert mode for `Ctrl+K` with no selection
+
+**End state:** `Ctrl+K` with no selection inserts the AI output at the cursor position instead of replacing the entire document.
+
+#### Changes
+
+| File                  | What changes                                                                                                                 |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `pi_rpc_service.dart` | When `editTarget` is empty, use an insert-mode prompt (before-cursor / after-cursor context) instead of the edit-mode prompt |
+| `editor_screen.dart`  | `editTarget = ''` when selection is collapsed; `_acceptDiff` inserts at `sel.start` instead of replacing the whole document  |
+
+#### Checklist
+
+- [x] `EditorScreen._submitAiPrompt`: change `editTarget` to `''` when `sel.isCollapsed`
+- [x] `EditorScreen._submitAiPrompt`: change `editTarget` to `''` when `sel.isCollapsed`
+- [x] `EditorScreen._acceptDiff`: when `sel.isCollapsed`, insert at cursor (`docText.substring(0, sel.start) + result + docText.substring(sel.start)`)
+- [x] `PiRpcService.streamEdit`: when `editTarget` is empty, send insert-mode prompt (before/after cursor context); otherwise send existing edit-mode prompt
+
+---
+
+### Phase 3.13 — Paragraph auto-selection for `Ctrl+K` with no selection
+
+**End state:** `Ctrl+K` with no selection on a non-blank line auto-selects the surrounding paragraph and enters edit mode. Cursor on a blank line falls back to insert mode (unchanged from 3.12).
+
+#### Changes
+
+| File                 | What changes                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `editor_screen.dart` | Add `_paragraphRangeAt` static helper; expand `_snapshotSelection` to paragraph range at start of `_submitAiPrompt` |
+
+#### Checklist
+
+- [x] `EditorScreen._paragraphRangeAt`: static helper returning `(start, end)?` for the paragraph at a given offset; returns null on blank lines
+- [x] `EditorScreen._submitAiPrompt`: when `_snapshotSelection.isCollapsed`, call `_paragraphRangeAt`; if non-null, mutate `_snapshotSelection` to cover the paragraph before the normal edit path runs
+
+### Phase 3.14 — Insert-mode prompt refinement and newline fix
+
+**End state:** Insert-mode prompts use an inline `[CURSOR]` marker instead of a before/after split; accepting the diff wraps the result with blank-line separators so paragraphs stay properly spaced.
+
+#### Changes
+
+| File                  | What changes                                                                                                                                                                             |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pi_rpc_service.dart` | `_buildPromptMessage` insert path: embed `[CURSOR]` directly in the document string; instruct the model to omit surrounding blank lines                                                  |
+| `editor_screen.dart`  | `_acceptDiff` collapsed branch: use `'\n' + result.trim() + '\n'` so the existing `\n` on each side of the blank line becomes a `\n\n` paragraph gap; update cursor position accordingly |
+
+#### Checklist
+
+- [x] `PiRpcService._buildPromptMessage`: replace before/after split framing with single `Document:\n$before[CURSOR]$after` string; update IMPORTANT instruction
+- [x] `EditorScreen._acceptDiff`: collapsed branch uses `trimmed = result.trim()`; inserts `'\n' + trimmed + '\n'`; `newCursorPos = sel.start + 1 + trimmed.length`
 
 ---
 

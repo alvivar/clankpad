@@ -85,6 +85,40 @@ class _EditorScreenState extends State<EditorScreen> {
 
   EditorState get _state => widget.editorState;
 
+  // ── Paragraph helper ─────────────────────────────────────────────────────────
+
+  /// Returns the [start, end) character range of the paragraph at [offset],
+  /// or null if [offset] falls on a blank line.
+  /// A paragraph is a maximal run of consecutive non-blank lines.
+  static (int, int)? _paragraphRangeAt(String text, int offset) {
+    final lineStart = offset == 0 ? 0 : text.lastIndexOf('\n', offset - 1) + 1;
+    final lineEndRaw = text.indexOf('\n', offset);
+    final lineEnd = lineEndRaw == -1 ? text.length : lineEndRaw;
+
+    if (text.substring(lineStart, lineEnd).trim().isEmpty) return null;
+
+    // Walk backward to paragraph start.
+    int paraStart = lineStart;
+    while (paraStart > 0) {
+      final prevEnd = paraStart - 1;
+      final prevStart = text.lastIndexOf('\n', prevEnd - 1) + 1;
+      if (text.substring(prevStart, prevEnd).trim().isEmpty) break;
+      paraStart = prevStart;
+    }
+
+    // Walk forward to paragraph end.
+    int paraEnd = lineEnd;
+    while (paraEnd < text.length) {
+      final nextStart = paraEnd + 1;
+      final nextEndRaw = text.indexOf('\n', nextStart);
+      final nextEnd = nextEndRaw == -1 ? text.length : nextEndRaw;
+      if (text.substring(nextStart, nextEnd).trim().isEmpty) break;
+      paraEnd = nextEnd;
+    }
+
+    return (paraStart, paraEnd);
+  }
+
   // ── Lifecycle ───────────────────────────────────────────────────────────────
 
   @override
@@ -343,9 +377,23 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Future<void> _submitAiPrompt(String prompt) async {
+    // Auto-select paragraph when cursor has no selection.
+    if (_snapshotSelection.isCollapsed) {
+      final range = _paragraphRangeAt(
+        _snapshotDocumentText,
+        _snapshotSelection.start,
+      );
+      if (range != null) {
+        _snapshotSelection = TextSelection(
+          baseOffset: range.$1,
+          extentOffset: range.$2,
+        );
+      }
+    }
+
     final sel = _snapshotSelection;
     final docText = _snapshotDocumentText;
-    final editTarget = sel.isCollapsed ? docText : sel.textInside(docText);
+    final editTarget = sel.isCollapsed ? '' : sel.textInside(docText);
 
     // Append to history; skip consecutive duplicates; cap at 50.
     if (_promptHistory.isEmpty || _promptHistory.last != prompt) {
@@ -372,6 +420,7 @@ class _EditorScreenState extends State<EditorScreen> {
         modelProvider: _selectedProvider,
         modelId: _selectedModelId,
         thinkingLevel: _thinkingLevel,
+        insertOffset: sel.isCollapsed ? sel.start : null,
       )) {
         // Exit if the widget was disposed or the user cancelled (which sets
         // _editorReadOnly = false) before the diff was opened.
@@ -434,8 +483,18 @@ class _EditorScreenState extends State<EditorScreen> {
     final int newCursorPos;
 
     if (sel.isCollapsed) {
-      newText = result;
-      newCursorPos = result.length;
+      // Cursor is on a blank line (Phase 3.13 guarantees this for insert mode).
+      // docText.substring(0, sel.start) ends with \n (the preceding line's newline).
+      // docText.substring(sel.start) starts with \n (the blank line character).
+      // Adding \n on each side → \n\n = blank-line separator on both sides.
+      final trimmed = result.trim();
+      newText =
+          docText.substring(0, sel.start) +
+          '\n' +
+          trimmed +
+          '\n' +
+          docText.substring(sel.start);
+      newCursorPos = sel.start + 1 + trimmed.length;
     } else {
       newText = docText.replaceRange(sel.start, sel.end, result);
       newCursorPos = sel.start + result.length;
