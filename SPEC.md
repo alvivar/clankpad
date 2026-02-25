@@ -190,7 +190,7 @@ These values are passed to the AI request unchanged. They do not update if the u
 
 A lightweight in-editor search bar for finding text within the active tab.
 
-**Trigger:** `Ctrl+F` opens the search bar (or focuses it if already open). `Escape` closes it and returns focus to the editor.
+**Trigger:** `Ctrl+F` opens the search bar (or focuses it if already open). `Escape` closes it and returns focus to the editor. If the editor has a non-collapsed, single-line selection when `Ctrl+F` is pressed, that text is pre-filled into the search field (all selected, so typing immediately replaces it); multi-line selections are ignored and the previous query is preserved.
 
 **UI:** A thin bar that appears between the tab bar and the editor area — part of the normal layout flow, not an overlay.
 
@@ -1257,10 +1257,10 @@ Cycle order: `off → low → medium → high → off → …`
 
 #### Changes
 
-| File                     | What changes                                                                                                                                                               |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| File                     | What changes                                                                                                                                                                  |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `models/editor_tab.dart` | Add `_editTargetStart`/`_editTargetEnd` fields; `setEditTarget(start, end)` + `clearEditTarget()` methods; unify `buildTextSpan` to merge both layers in a single sorted pass |
-| `editor_screen.dart`     | `_openAiPrompt`: pre-expand paragraph range and call `setEditTarget`; `_dismissAiPrompt`, `_acceptDiff`, `_rejectDiff`: call `clearEditTarget`                             |
+| `editor_screen.dart`     | `_openAiPrompt`: pre-expand paragraph range and call `setEditTarget`; `_dismissAiPrompt`, `_acceptDiff`, `_rejectDiff`: call `clearEditTarget`                                |
 
 #### Checklist
 
@@ -1269,6 +1269,24 @@ Cycle order: `off → low → medium → high → off → …`
 - [x] `EditorScreen._dismissAiPrompt`: call `controller.clearEditTarget()`
 - [x] `EditorScreen._acceptDiff`: call `controller.clearEditTarget()`
 - [x] `EditorScreen._rejectDiff`: call `controller.clearEditTarget()`
+
+---
+
+### Phase 3.18 — Pre-fill search field from selection
+
+**End state:** When `Ctrl+F` is pressed while the editor has a non-collapsed, single-line selection, the selected text is placed into the search field (fully selected so typing replaces it). Matches are computed and jumped to immediately. If the bar was already open the query is updated in-place. Multi-line selections are ignored.
+
+#### Changes
+
+| File                 | What changes                                                                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `editor_screen.dart` | `_openSearch`: read active-tab controller selection; if non-collapsed single-line, set `_searchController.value` with prefill + run search |
+
+#### Checklist
+
+- [x] `EditorScreen._openSearch`: extract selected text (single-line only); set `_searchController.value` with `TextSelection` spanning the full prefill text
+- [x] `EditorScreen._openSearch`: if bar already open with prefill, call `_onSearchQueryChanged` then re-focus
+- [x] `EditorScreen._openSearch`: use prefill as query when computing initial matches on bar open
 
 ---
 

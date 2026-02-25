@@ -151,16 +151,36 @@ class _EditorScreenState extends State<EditorScreen> {
 
   void _openSearch() {
     if (_aiPromptVisible || _diffVisible) return;
-    // If already open, just focus the field (Ctrl+F = re-focus if visible).
+
+    // If there's a non-collapsed, single-line selection, pre-fill it.
+    final sel = _state.activeTab.controller.selection;
+    final docText = _state.activeTab.controller.text;
+    final selectedText = sel.isCollapsed
+        ? null
+        : docText.substring(sel.start, sel.end);
+    final prefill = (selectedText != null && !selectedText.contains('\n'))
+        ? selectedText
+        : null;
+
+    if (prefill != null) {
+      _searchController.value = TextEditingValue(
+        text: prefill,
+        selection: TextSelection(baseOffset: 0, extentOffset: prefill.length),
+      );
+    }
+
+    // If already open, update query (if prefilled) and re-focus.
     if (_searchVisible) {
+      if (prefill != null) _onSearchQueryChanged(prefill);
       _searchFocusNode.requestFocus();
       return;
     }
+
     // Compute fresh matches for the current tab content.
-    final query = _searchController.text;
+    final query = prefill ?? _searchController.text;
     final matches = query.isEmpty
         ? const <int>[]
-        : _computeMatches(_state.activeTab.controller.text, query);
+        : _computeMatches(docText, query);
     setState(() {
       _searchVisible = true;
       _searchMatches = matches;
@@ -409,10 +429,7 @@ class _EditorScreenState extends State<EditorScreen> {
     if (highlight.isCollapsed) {
       final range = _paragraphRangeAt(_snapshotDocumentText, highlight.start);
       if (range != null) {
-        highlight = TextSelection(
-          baseOffset: range.$1,
-          extentOffset: range.$2,
-        );
+        highlight = TextSelection(baseOffset: range.$1, extentOffset: range.$2);
       }
     }
     if (!highlight.isCollapsed) {
