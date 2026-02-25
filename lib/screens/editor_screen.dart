@@ -400,6 +400,25 @@ class _EditorScreenState extends State<EditorScreen> {
       _aiPromptVisible = true;
     });
 
+    // Highlight the edit target in the editor so the user can see what will be
+    // edited while they type their prompt (and later during streaming/diff).
+    // For a collapsed cursor on a non-blank line, pre-expand to the paragraph
+    // range — the same expansion _submitAiPrompt applies on submit.
+    // Blank-line insert mode has no meaningful range to highlight.
+    var highlight = _snapshotSelection;
+    if (highlight.isCollapsed) {
+      final range = _paragraphRangeAt(_snapshotDocumentText, highlight.start);
+      if (range != null) {
+        highlight = TextSelection(
+          baseOffset: range.$1,
+          extentOffset: range.$2,
+        );
+      }
+    }
+    if (!highlight.isCollapsed) {
+      controller.setEditTarget(highlight.start, highlight.end);
+    }
+
     // Pre-warm Pi and fetch the model list once per session. Runs concurrently
     // with the user typing their prompt — silent on error (submit still works).
     if (_availableModels.isEmpty && !_modelsLoading) {
@@ -495,6 +514,7 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   void _dismissAiPrompt() {
+    _state.activeTab.controller.clearEditTarget();
     setState(() => _aiPromptVisible = false);
     // _editorFocusNode is permanently attached to the TextField (no ValueKey,
     // no element recreation), so requestFocus() is safe to call synchronously
@@ -627,10 +647,12 @@ class _EditorScreenState extends State<EditorScreen> {
       newCursorPos = sel.start + result.length;
     }
 
-    _state.activeTab.controller.value = TextEditingValue(
+    final controller = _state.activeTab.controller;
+    controller.value = TextEditingValue(
       text: newText,
       selection: TextSelection.collapsed(offset: newCursorPos),
     );
+    controller.clearEditTarget();
 
     setState(() {
       _diffVisible = false;
@@ -645,6 +667,7 @@ class _EditorScreenState extends State<EditorScreen> {
     // Abort Pi if the stream is still running (e.g. user rejects while
     // tokens are still arriving). No-op if the stream has already finished.
     _piRpcService.abort();
+    _state.activeTab.controller.clearEditTarget();
     // Text is unchanged — no controller update needed.
     setState(() {
       _diffVisible = false;

@@ -1,13 +1,25 @@
 import 'package:flutter/material.dart';
 
-/// A [TextEditingController] that paints search-match highlights via
-/// [buildTextSpan], independently of whether the editor has focus.
+/// A [TextEditingController] that paints highlight layers via [buildTextSpan],
+/// independently of whether the editor has focus.
 ///
-/// Call [setMatches] when the active query or current index changes.
-/// Call [clearMatches] when the find bar closes.
+/// Two independent layers, each managed separately:
+///
+/// **Search matches** (`setMatches` / `clearMatches`) — painted while the find
+/// bar is open. All matches use `primaryContainer`; the current match uses
+/// `primary` at 35 % opacity.
+///
+/// **Edit target** (`setEditTarget` / `clearEditTarget`) — painted while the
+/// Ctrl+K popup or AI diff is active, showing the user what text will be (or
+/// was) edited. Uses `tertiaryContainer`.
+///
+/// Both layers are sorted and rendered together in a single pass, so they can
+/// coexist without conflict (they are mutually exclusive in normal usage).
 class HighlightingController extends TextEditingController {
   HighlightingController.fromValue(TextEditingValue value)
-    : super.fromValue(value);
+      : super.fromValue(value);
+
+  // ── Search-match layer ───────────────────────────────────────────────────────
 
   List<int> _matchOffsets = const [];
   int _queryLength = 0;
@@ -28,13 +40,37 @@ class HighlightingController extends TextEditingController {
     notifyListeners();
   }
 
+  // ── Edit-target layer ────────────────────────────────────────────────────────
+
+  int _editTargetStart = -1;
+  int _editTargetEnd = -1;
+
+  void setEditTarget(int start, int end) {
+    _editTargetStart = start;
+    _editTargetEnd = end;
+    notifyListeners();
+  }
+
+  void clearEditTarget() {
+    if (_editTargetStart == -1) return; // skip spurious rebuilds
+    _editTargetStart = -1;
+    _editTargetEnd = -1;
+    notifyListeners();
+  }
+
+  // ── Rendering ────────────────────────────────────────────────────────────────
+
   @override
   TextSpan buildTextSpan({
     required BuildContext context,
     TextStyle? style,
     required bool withComposing,
   }) {
-    if (_matchOffsets.isEmpty || _queryLength == 0) {
+    final hasMatches = _matchOffsets.isNotEmpty && _queryLength > 0;
+    final hasEditTarget =
+        _editTargetStart >= 0 && _editTargetEnd > _editTargetStart;
+
+    if (!hasMatches && !hasEditTarget) {
       return super.buildTextSpan(
         context: context,
         style: style,
@@ -43,30 +79,43 @@ class HighlightingController extends TextEditingController {
     }
 
     final colorScheme = Theme.of(context).colorScheme;
-    // All matches get a container tint; the current match gets a stronger one.
-    final otherColor = colorScheme.primaryContainer;
-    final currentColor = colorScheme.primary.withOpacity(0.35);
-
     final text = this.text;
+
+    // Collect all (start, end, color) intervals from both layers.
+    final intervals = <(int, int, Color)>[];
+
+    if (hasEditTarget) {
+      final s = _editTargetStart.clamp(0, text.length);
+      final e = _editTargetEnd.clamp(0, text.length);
+      if (e > s) intervals.add((s, e, colorScheme.tertiaryContainer));
+    }
+
+    if (hasMatches) {
+      final otherColor = colorScheme.primaryContainer;
+      final currentColor = colorScheme.primary.withOpacity(0.35);
+      for (var i = 0; i < _matchOffsets.length; i++) {
+        final s = _matchOffsets[i];
+        if (s >= text.length) break;
+        final e = (s + _queryLength).clamp(0, text.length);
+        intervals.add((s, e, i == _currentIndex ? currentColor : otherColor));
+      }
+    }
+
+    // Sort by start so we can walk left-to-right in one pass.
+    intervals.sort((a, b) => a.$1.compareTo(b.$1));
+
     final spans = <TextSpan>[];
     var cursor = 0;
 
-    for (var i = 0; i < _matchOffsets.length; i++) {
-      final start = _matchOffsets[i];
-      final end = (start + _queryLength).clamp(0, text.length);
-      if (start >= text.length) break;
-
+    for (final (start, end, color) in intervals) {
+      if (start >= text.length || start < cursor) continue;
       if (start > cursor) {
         spans.add(TextSpan(text: text.substring(cursor, start), style: style));
       }
-      spans.add(
-        TextSpan(
-          text: text.substring(start, end),
-          style: (style ?? const TextStyle()).copyWith(
-            backgroundColor: i == _currentIndex ? currentColor : otherColor,
-          ),
-        ),
-      );
+      spans.add(TextSpan(
+        text: text.substring(start, end),
+        style: (style ?? const TextStyle()).copyWith(backgroundColor: color),
+      ));
       cursor = end;
     }
 

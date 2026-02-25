@@ -164,6 +164,8 @@ These values are passed to the AI request unchanged. They do not update if the u
 - **Edit mode** (selection exists): the AI receives `documentText` as context and `editTarget` as the text to transform. The output replaces `editTarget`.
 - **Insert mode** (no selection, blank line): the AI receives the full document with a `[CURSOR]` marker embedded at the insertion point. The model sees the document as a coherent whole and is instructed to reply with only the text to insert — without surrounding blank lines. On accept, the editor wraps the (trimmed) result with `\n…\n`, producing a blank-line separation from both the preceding and following paragraphs.
 
+**Edit target highlight _(Phase 3.17)_.** When the popup opens, the edit target range is painted in the editor using `HighlightingController.setEditTarget` (`tertiaryContainer` background color) — the same focus-independent `buildTextSpan` technique as find-bar matches. The highlight persists through the loading phase and diff view so the user always has a visual anchor showing exactly what is being edited. It is cleared on dismiss, accept, or reject. For a collapsed cursor on a non-blank line the paragraph range is pre-expanded (same logic as `_submitAiPrompt`) so the highlight is accurate from the moment the popup opens. Blank-line insert mode has no range to highlight.
+
 **Editing locked during request.** While the AI request is in-flight, the editor `TextField` is set to `readOnly: true`. A thin linear progress indicator appears below the tab bar. On response (success or error), `readOnly` is restored. Drift detection (applying results against a changed document) is explicitly out of scope — locking is simpler and requests are short.
 
 **Result (Phase 1 — simple replace):**
@@ -1246,6 +1248,27 @@ Cycle order: `off → low → medium → high → off → …`
 - [x] `EditorScreen._jumpToMatch`: call `setMatches` on controller; collapsed selection for cursor-only scroll
 - [x] `EditorScreen._closeSearch`: `clearMatches()` on every tab
 - [x] `EditorScreen._onSearchQueryChanged`: `clearMatches()` on active tab when query yields no matches
+
+---
+
+### Phase 3.17 — Edit-target highlight during AI edit
+
+**End state:** When the Ctrl+K popup opens, the edit target is highlighted in `tertiaryContainer` — the same focus-independent `buildTextSpan` technique introduced in Phase 3.16. The highlight persists through streaming and the diff view, giving the user a continuous visual anchor showing what is being edited. Cleared on dismiss, accept, or reject.
+
+#### Changes
+
+| File                     | What changes                                                                                                                                                               |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `models/editor_tab.dart` | Add `_editTargetStart`/`_editTargetEnd` fields; `setEditTarget(start, end)` + `clearEditTarget()` methods; unify `buildTextSpan` to merge both layers in a single sorted pass |
+| `editor_screen.dart`     | `_openAiPrompt`: pre-expand paragraph range and call `setEditTarget`; `_dismissAiPrompt`, `_acceptDiff`, `_rejectDiff`: call `clearEditTarget`                             |
+
+#### Checklist
+
+- [x] `HighlightingController`: add `setEditTarget(start, end)` + `clearEditTarget()`; `buildTextSpan` collects intervals from both layers, sorts by start, renders in one pass
+- [x] `EditorScreen._openAiPrompt`: compute edit target (selection or paragraph-expanded range); call `controller.setEditTarget`
+- [x] `EditorScreen._dismissAiPrompt`: call `controller.clearEditTarget()`
+- [x] `EditorScreen._acceptDiff`: call `controller.clearEditTarget()`
+- [x] `EditorScreen._rejectDiff`: call `controller.clearEditTarget()`
 
 ---
 
