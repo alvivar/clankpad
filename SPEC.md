@@ -209,15 +209,20 @@ A lightweight in-editor search bar for finding text within the active tab.
 - **Wraps around** — next from the last match goes to the first; previous from the first goes to the last.
 - On tab switch while open, the search re-runs against the new tab's content and resets to the first match.
 
-**Match highlighting:** The active match is shown as the editor's text selection (`TextEditingController.selection`). Only the current match is highlighted — no simultaneous highlighting of all matches. The editor scrolls to keep the active match visible.
+**Match highlighting:** Implemented via `HighlightingController.buildTextSpan` — a `TextEditingController` subclass that overrides text rendering to paint background colors directly onto match ranges, independent of focus:
+
+- **All matches** — `colorScheme.primaryContainer` tint.
+- **Current match** — `colorScheme.primary` at 35 % opacity (more prominent).
+
+Because the highlight is baked into the text spans rather than the Flutter selection layer, it remains visible even when the search field (not the editor) holds focus — a limitation of Flutter's `EditableText`, which only paints selection highlights for the focused widget. The editor scrolls to the current match by briefly requesting editor focus (triggering `EditableText`'s scroll-to-cursor behaviour), then returning focus to the search field.
 
 **Keyboard shortcuts inside the search field** (via `Focus.onKeyEvent`):
 
-| Key                              | Action        |
-| -------------------------------- | ------------- |
-| `Enter` / `F3`                   | Next match    |
-| `Shift+Enter` / `Shift+F3`       | Previous match|
-| `Escape`                         | Close bar     |
+| Key                        | Action         |
+| -------------------------- | -------------- |
+| `Enter` / `F3`             | Next match     |
+| `Shift+Enter` / `Shift+F3` | Previous match |
+| `Escape`                   | Close bar      |
 
 **Focus rules:** The search field holds focus while the bar is open. Navigation (↑ / ↓ buttons and keyboard shortcuts) leaves focus in the search field. Closing the bar returns focus to the editor.
 
@@ -277,7 +282,7 @@ class EditorTab {
   String? filePath;                                // null if the file has not been saved yet
   String title;                                    // file name or "Untitled N"
   String savedContent;                             // content at last save (to detect changes)
-  final TextEditingController controller;          // source of truth for current text
+  final HighlightingController controller;         // source of truth for current text; also paints find-bar highlights
   final ScrollController scrollController;         // per-tab scroll position (see §5 Focus Management)
   final ValueNotifier<bool> isDirtyNotifier;       // drives only the ● dot in the tab chip
 
@@ -1202,10 +1207,10 @@ Cycle order: `off → low → medium → high → off → …`
 
 #### Changes
 
-| File                     | What changes                                                                                                                                         |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `editor_screen.dart`     | 5 new fields + `OpenSearchIntent`; `_openSearch`, `_closeSearch`, `_onSearchQueryChanged`, `_nextMatch`, `_prevMatch`, `_jumpToMatch` methods; search bar inserted in `Column` layout |
-| `widgets/find_bar.dart`   | New `StatelessWidget`; `Row` with `TextField`, match counter, `↑`/`↓`/`×` buttons; `Focus.onKeyEvent` intercepts Enter/F3/Escape                    |
+| File                    | What changes                                                                                                                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `editor_screen.dart`    | 5 new fields + `OpenSearchIntent`; `_openSearch`, `_closeSearch`, `_onSearchQueryChanged`, `_nextMatch`, `_prevMatch`, `_jumpToMatch` methods; search bar inserted in `Column` layout |
+| `widgets/find_bar.dart` | New `StatelessWidget`; `Row` with `TextField`, match counter, `↑`/`↓`/`×` buttons; `Focus.onKeyEvent` intercepts Enter/F3/Escape                                                      |
 
 #### Checklist
 
@@ -1220,6 +1225,27 @@ Cycle order: `off → low → medium → high → off → …`
 - [x] `widgets/find_bar.dart`: `StatelessWidget` accepting controller, focusNode, matchCount, matchIndex, onQueryChanged, onNext, onPrev, onClose
 - [x] `widgets/find_bar.dart`: `Focus.onKeyEvent` — Enter/F3 → onNext; Shift+Enter/Shift+F3 → onPrev; Escape → onClose
 - [x] `widgets/find_bar.dart`: ↑ / ↓ / × buttons wrapped in `ExcludeFocus`
+
+---
+
+### Phase 3.16 — Focus-independent match highlighting
+
+**End state:** Search matches are highlighted via `HighlightingController.buildTextSpan` rather than via text selection — all matches visible at once, always, regardless of which widget holds focus. Solves a Flutter limitation: `EditableText` only paints the selection highlight for the focused widget, so the selection-based approach from Phase 3.15 was invisible while the find bar held focus.
+
+#### Changes
+
+| File                     | What changes                                                                                                                                                                                    |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `models/editor_tab.dart` | Add `HighlightingController extends TextEditingController`; override `buildTextSpan` to paint match backgrounds; change `EditorTab.controller` type to `HighlightingController`                 |
+| `editor_screen.dart`     | `_jumpToMatch`: call `controller.setMatches(...)` + collapsed selection (cursor only); `_closeSearch`: `clearMatches()` on all tabs; `_onSearchQueryChanged`: `clearMatches()` on no-match case |
+
+#### Checklist
+
+- [x] `HighlightingController`: `setMatches(offsets, queryLength, currentIndex)` + `clearMatches()`; `buildTextSpan` paints `primaryContainer` for all matches, `primary.withOpacity(0.35)` for current
+- [x] `EditorTab.controller`: type changed from `TextEditingController` to `HighlightingController`
+- [x] `EditorScreen._jumpToMatch`: call `setMatches` on controller; collapsed selection for cursor-only scroll
+- [x] `EditorScreen._closeSearch`: `clearMatches()` on every tab
+- [x] `EditorScreen._onSearchQueryChanged`: `clearMatches()` on active tab when query yields no matches
 
 ---
 

@@ -176,10 +176,11 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   void _closeSearch() {
-    // Collapse the selection to a cursor so the match highlight disappears.
-    final ctrl = _state.activeTab.controller;
-    final offset = ctrl.selection.baseOffset.clamp(0, ctrl.text.length);
-    ctrl.selection = TextSelection.collapsed(offset: offset);
+    // Clear highlights on every tab (the user may have switched tabs while
+    // the bar was open, leaving stale highlights on non-active controllers).
+    for (final tab in _state.tabs) {
+      tab.controller.clearMatches();
+    }
     setState(() {
       _searchVisible = false;
       _searchMatches = const [];
@@ -197,6 +198,8 @@ class _EditorScreenState extends State<EditorScreen> {
     if (matches.isNotEmpty) {
       _jumpToMatch(0);
     } else {
+      // Clear any highlights left from a previous query.
+      _state.activeTab.controller.clearMatches();
       _searchFocusNode.requestFocus();
     }
   }
@@ -216,16 +219,20 @@ class _EditorScreenState extends State<EditorScreen> {
     _jumpToMatch(prev);
   }
 
-  /// Highlights [index] in the editor by setting the selection, briefly gives
-  /// the editor focus so EditableText scrolls to the selection, then returns
-  /// focus to the find bar.
+  /// Updates the controller's match highlights, scrolls the editor to the
+  /// match, then returns focus to the find bar.
   void _jumpToMatch(int index) {
-    final start = _searchMatches[index];
-    final end = start + _searchController.text.length;
-    _state.activeTab.controller.selection = TextSelection(
-      baseOffset: start,
-      extentOffset: end,
+    final controller = _state.activeTab.controller;
+    // Paint all match highlights, marking [index] as the current one.
+    controller.setMatches(_searchMatches, _searchController.text.length, index);
+    // Collapsed selection at the match start — gives EditableText a caret
+    // position to scroll to without adding a visible selection box on top of
+    // the background-color highlight from buildTextSpan.
+    controller.selection = TextSelection.collapsed(
+      offset: _searchMatches[index],
     );
+    // Briefly focus the editor so it scrolls to the caret, then return focus
+    // to the find bar.
     _editorFocusNode.requestFocus();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _searchVisible) _searchFocusNode.requestFocus();
