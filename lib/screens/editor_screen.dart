@@ -35,6 +35,7 @@ class _EditorScreenState extends State<EditorScreen> {
   // Snapshot captured when the Ctrl+K popup opens.
   String _snapshotDocumentText = '';
   TextSelection _snapshotSelection = const TextSelection.collapsed(offset: 0);
+  int? _snapshotTabId; // safety-net: apply diff to the tab that was snapshotted
 
   // Diff view state — populated as chunks arrive from the AI stream.
   bool _diffVisible = false;
@@ -95,6 +96,11 @@ class _EditorScreenState extends State<EditorScreen> {
   // ── Convenience ─────────────────────────────────────────────────────────────
 
   EditorState get _state => widget.editorState;
+
+  /// True during every AI phase: prompt open, streaming, and diff visible.
+  /// Used to guard structural actions (new/close/open/switch) that would
+  /// invalidate the snapshot or apply the diff to the wrong tab.
+  bool get _aiActive => _aiPromptVisible || _editorReadOnly || _diffVisible;
 
   // ── Paragraph helper ─────────────────────────────────────────────────────────
 
@@ -417,6 +423,7 @@ class _EditorScreenState extends State<EditorScreen> {
     setState(() {
       _snapshotDocumentText = controller.text;
       _snapshotSelection = controller.selection;
+      _snapshotTabId = _state.activeTab.id;
       _aiPromptVisible = true;
     });
 
@@ -530,8 +537,22 @@ class _EditorScreenState extends State<EditorScreen> {
         : _promptHistory[_historyIndex];
   }
 
+  /// Returns the tab that was active when the AI snapshot was taken.
+  /// Falls back to [EditorState.activeTab] if the tab was closed in the
+  /// interim (should not happen with the structural-action guards, but
+  /// provides a safe fallback).
+  EditorTab get _snapshotTab {
+    if (_snapshotTabId != null) {
+      for (final t in _state.tabs) {
+        if (t.id == _snapshotTabId) return t;
+      }
+    }
+    return _state.activeTab;
+  }
+
   void _dismissAiPrompt() {
-    _state.activeTab.controller.clearEditTarget();
+    _snapshotTab.controller.clearEditTarget();
+    _snapshotTabId = null;
     setState(() => _aiPromptVisible = false);
     // _editorFocusNode is permanently attached to the TextField (no ValueKey,
     // no element recreation), so requestFocus() is safe to call synchronously
@@ -664,12 +685,13 @@ class _EditorScreenState extends State<EditorScreen> {
       newCursorPos = sel.start + result.length;
     }
 
-    final controller = _state.activeTab.controller;
+    final controller = _snapshotTab.controller;
     controller.value = TextEditingValue(
       text: newText,
       selection: TextSelection.collapsed(offset: newCursorPos),
     );
     controller.clearEditTarget();
+    _snapshotTabId = null;
 
     setState(() {
       _diffVisible = false;
@@ -684,7 +706,8 @@ class _EditorScreenState extends State<EditorScreen> {
     // Abort Pi if the stream is still running (e.g. user rejects while
     // tokens are still arriving). No-op if the stream has already finished.
     _piRpcService.abort();
-    _state.activeTab.controller.clearEditTarget();
+    _snapshotTab.controller.clearEditTarget();
+    _snapshotTabId = null;
     // Text is unchanged — no controller update needed.
     setState(() {
       _diffVisible = false;
@@ -806,13 +829,14 @@ class _EditorScreenState extends State<EditorScreen> {
       child: Actions(
         actions: {
           NewTabIntent: CallbackAction<NewTabIntent>(
-            onInvoke: (_) => _state.newTab(),
+            onInvoke: (_) => _aiActive ? null : _state.newTab(),
           ),
           CloseTabIntent: CallbackAction<CloseTabIntent>(
-            onInvoke: (_) => _handleCloseTab(_state.activeTabIndex),
+            onInvoke: (_) =>
+                _aiActive ? null : _handleCloseTab(_state.activeTabIndex),
           ),
           OpenFileIntent: CallbackAction<OpenFileIntent>(
-            onInvoke: (_) => _openFile(),
+            onInvoke: (_) => _aiActive ? null : _openFile(),
           ),
           SaveIntent: CallbackAction<SaveIntent>(
             onInvoke: (_) => _saveTab(_state.activeTabIndex),
@@ -842,9 +866,15 @@ class _EditorScreenState extends State<EditorScreen> {
               EditorTabBar(
                 tabs: _state.tabs,
                 activeTabIndex: _state.activeTabIndex,
-                onTabTap: _state.switchTab,
-                onTabClose: _handleCloseTab,
-                onNewTab: _state.newTab,
+                onTabTap: (i) {
+                  if (!_aiActive) _state.switchTab(i);
+                },
+                onTabClose: (i) {
+                  if (!_aiActive) _handleCloseTab(i);
+                },
+                onNewTab: () {
+                  if (!_aiActive) _state.newTab();
+                },
               ),
 
               // Error banner — shown after a Pi failure; dismissed by ×.

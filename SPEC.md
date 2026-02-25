@@ -168,6 +168,8 @@ These values are passed to the AI request unchanged. They do not update if the u
 
 **Editing locked during request.** While the AI request is in-flight, the editor `TextField` is set to `readOnly: true`. A thin linear progress indicator appears below the tab bar. On response (success or error), `readOnly` is restored. Drift detection (applying results against a changed document) is explicitly out of scope — locking is simpler and requests are short.
 
+**Structural actions locked during AI _(Phase 3.19)_.** While any AI phase is active (prompt open, streaming, or diff visible — `_aiActive`), the following actions are silently blocked to prevent the snapshot and the apply target from diverging across tabs: new tab (`Ctrl+N`), close tab (`Ctrl+W`), open file (`Ctrl+O`), tab-bar mouse clicks (switch/close/new). Save is not blocked. As a belt-and-suspenders safety net, `_snapshotTabId` is recorded when the prompt opens and used to resolve the correct tab controller in `_acceptDiff` / `_rejectDiff` / `_dismissAiPrompt`, regardless of which tab is currently active.
+
 **Result (Phase 1 — simple replace):**
 
 - The popup closes, then `editTarget` within the document is replaced directly with the AI output using the frozen `selectionRange`. No diff view.
@@ -1287,6 +1289,29 @@ Cycle order: `off → low → medium → high → off → …`
 - [x] `EditorScreen._openSearch`: extract selected text (single-line only); set `_searchController.value` with `TextSelection` spanning the full prefill text
 - [x] `EditorScreen._openSearch`: if bar already open with prefill, call `_onSearchQueryChanged` then re-focus
 - [x] `EditorScreen._openSearch`: use prefill as query when computing initial matches on bar open
+
+---
+
+### Phase 3.19 — Lock structural actions during AI
+
+**End state:** New tab, close tab, open file, and tab-bar mouse interactions are silently blocked during every AI phase (prompt open, streaming, diff visible). `_snapshotTabId` is stored on prompt open and used to resolve the correct tab on accept/reject/dismiss, making diff application correct even if guards are somehow bypassed.
+
+#### Changes
+
+| File                 | What changes                                                                                                                                                                                                                                          |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `editor_screen.dart` | Add `bool get _aiActive`; add `int? _snapshotTabId` + `EditorTab get _snapshotTab`; guard `NewTabIntent`, `CloseTabIntent`, `OpenFileIntent` actions; guard tab-bar callbacks; use `_snapshotTab` in `_acceptDiff`, `_rejectDiff`, `_dismissAiPrompt` |
+
+#### Checklist
+
+- [x] `EditorScreen`: add `bool get _aiActive => _aiPromptVisible || _editorReadOnly || _diffVisible`
+- [x] `EditorScreen`: add `int? _snapshotTabId`; set in `_openAiPrompt`; clear in `_dismissAiPrompt`, `_acceptDiff`, `_rejectDiff`
+- [x] `EditorScreen`: add `EditorTab get _snapshotTab` (finds tab by `_snapshotTabId`, falls back to `activeTab`)
+- [x] `EditorScreen`: guard `NewTabIntent`, `CloseTabIntent`, `OpenFileIntent` actions with `_aiActive` check
+- [x] `EditorScreen`: guard `onTabTap`, `onTabClose`, `onNewTab` callbacks in `EditorTabBar` with `_aiActive` check
+- [x] `EditorScreen._acceptDiff`: use `_snapshotTab.controller` instead of `activeTab.controller`
+- [x] `EditorScreen._rejectDiff`: use `_snapshotTab.controller` instead of `activeTab.controller`
+- [x] `EditorScreen._dismissAiPrompt`: use `_snapshotTab.controller` instead of `activeTab.controller`
 
 ---
 
