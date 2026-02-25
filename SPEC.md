@@ -184,11 +184,50 @@ These values are passed to the AI request unchanged. They do not update if the u
 - A **Cancel** button (below the tab bar, replacing the progress indicator) aborts the in-flight Pi run at any point by sending `{"type": "abort"}` to Pi's stdin. `Escape` while no popup or diff is visible has the same effect.
 - Errors (Pi not found, Pi process crashed, model error reported by Pi) surface as a dismissable **error banner** below the tab bar rather than a blocking dialog. The editor unlocks immediately so the user is never stuck waiting for a button click to resume.
 
-### 2.8 Menu Bar _(optional / Phase 4)_
+### 2.8 Find (`Ctrl+F`) _(Phase 3.15)_
+
+A lightweight in-editor search bar for finding text within the active tab.
+
+**Trigger:** `Ctrl+F` opens the search bar (or focuses it if already open). `Escape` closes it and returns focus to the editor.
+
+**UI:** A thin bar that appears between the tab bar and the editor area — part of the normal layout flow, not an overlay.
+
+```
+[ Search field...              ]  [ 3 of 12 ]  [↑]  [↓]  [×]
+```
+
+- **Search field** — grows to fill available space; `TextField` with the search query.
+- **Match counter** — `N of M` (e.g. `3 of 12`); shows `No results` when the query has no matches; hidden when the field is empty.
+- **↑ / ↓ buttons** — navigate to previous / next match; `ExcludeFocus`-wrapped so clicks do not steal focus from the search field.
+- **× button** — closes the bar; `ExcludeFocus`-wrapped.
+
+**Search behaviour:**
+
+- **Live** — matches recompute on every keystroke.
+- **Case-insensitive.**
+- **Non-overlapping.**
+- **Wraps around** — next from the last match goes to the first; previous from the first goes to the last.
+- On tab switch while open, the search re-runs against the new tab's content and resets to the first match.
+
+**Match highlighting:** The active match is shown as the editor's text selection (`TextEditingController.selection`). Only the current match is highlighted — no simultaneous highlighting of all matches. The editor scrolls to keep the active match visible.
+
+**Keyboard shortcuts inside the search field** (via `Focus.onKeyEvent`):
+
+| Key                              | Action        |
+| -------------------------------- | ------------- |
+| `Enter` / `F3`                   | Next match    |
+| `Shift+Enter` / `Shift+F3`       | Previous match|
+| `Escape`                         | Close bar     |
+
+**Focus rules:** The search field holds focus while the bar is open. Navigation (↑ / ↓ buttons and keyboard shortcuts) leaves focus in the search field. Closing the bar returns focus to the editor.
+
+**Interaction with AI popup:** `Ctrl+F` is blocked while the AI prompt popup or diff overlay is active (same mechanism as other app shortcuts — `DoNothingAndStopPropagationIntent` inside the popup's local `Shortcuts`).
+
+### 2.9 Menu Bar _(optional / Phase 4)_
 
 `File` menu with: New, Open, Save, Save As, Close Tab, Exit.
 
-### 2.9 Pi as AI Backend _(Phase 3.7)_
+### 2.10 Pi as AI Backend _(Phase 3.7)_
 
 Clankpad delegates all AI calls to **Pi** (`pi --mode rpc`), an external agent process it spawns as a child process. Clankpad never calls any model API directly — Pi owns auth, model selection, retry logic, and streaming.
 
@@ -1154,6 +1193,33 @@ Cycle order: `off → low → medium → high → off → …`
 
 - [x] `PiRpcService._buildPromptMessage`: replace before/after split framing with single `Document:\n$before[CURSOR]$after` string; update IMPORTANT instruction
 - [x] `EditorScreen._acceptDiff`: collapsed branch uses `trimmed = result.trim()`; inserts `'\n' + trimmed + '\n'`; `newCursorPos = sel.start + 1 + trimmed.length`
+
+---
+
+### Phase 3.15 — Find (`Ctrl+F`)
+
+**End state:** `Ctrl+F` opens a search bar between the tab bar and the editor. The user types a query; matches are highlighted live as the editor's text selection. `↑` / `↓` buttons (and `Enter` / `Shift+Enter`) navigate between matches with wrap-around. `Escape` closes the bar and returns focus to the editor.
+
+#### Changes
+
+| File                     | What changes                                                                                                                                         |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `editor_screen.dart`     | 5 new fields + `OpenSearchIntent`; `_openSearch`, `_closeSearch`, `_onSearchQueryChanged`, `_nextMatch`, `_prevMatch`, `_jumpToMatch` methods; search bar inserted in `Column` layout |
+| `widgets/find_bar.dart`   | New `StatelessWidget`; `Row` with `TextField`, match counter, `↑`/`↓`/`×` buttons; `Focus.onKeyEvent` intercepts Enter/F3/Escape                    |
+
+#### Checklist
+
+- [x] `EditorScreen`: add `bool _searchVisible`, `TextEditingController _searchController`, `FocusNode _searchFocusNode`, `List<int> _searchMatches`, `int _searchMatchIndex` fields
+- [x] `EditorScreen`: add `OpenSearchIntent` + handler; register `Ctrl+F` in the root `Shortcuts` map
+- [x] `EditorScreen`: add static `_computeMatches(String text, String query) → List<int>`
+- [x] `EditorScreen`: add `_openSearch()`, `_closeSearch()`, `_onSearchQueryChanged(String)`, `_nextMatch()`, `_prevMatch()`, `_jumpToMatch(int)` methods
+- [x] `EditorScreen`: insert `if (_searchVisible) FindBar(...)` in `Column` between tab bar area and editor
+- [x] `EditorScreen`: re-run search on tab switch (in `_onEditorStateChanged`) if `_searchVisible`
+- [x] `EditorScreen`: dispose `_searchController` and `_searchFocusNode` in `State.dispose()`
+- [x] `EditorScreen`: add `Ctrl+F` to the AI popup's local `DoNothingAndStopPropagationIntent` shortcuts map
+- [x] `widgets/find_bar.dart`: `StatelessWidget` accepting controller, focusNode, matchCount, matchIndex, onQueryChanged, onNext, onPrev, onClose
+- [x] `widgets/find_bar.dart`: `Focus.onKeyEvent` — Enter/F3 → onNext; Shift+Enter/Shift+F3 → onPrev; Escape → onClose
+- [x] `widgets/find_bar.dart`: ↑ / ↓ / × buttons wrapped in `ExcludeFocus`
 
 ---
 

@@ -12,6 +12,7 @@ import '../widgets/ai_diff_view.dart';
 import '../widgets/ai_prompt_popup.dart' show AiModelSettings, AiPromptPopup;
 import '../widgets/editor_area.dart';
 import '../widgets/editor_tab_bar.dart';
+import '../widgets/find_bar.dart';
 
 class EditorScreen extends StatefulWidget {
   final EditorState editorState;
@@ -47,6 +48,16 @@ class _EditorScreenState extends State<EditorScreen> {
   final List<String> _promptHistory = [];
   int _historyIndex = 0; // reset to _promptHistory.length on popup open
   String _historySavedInput = ''; // preserves draft while navigating history
+
+  // ── Find bar state ───────────────────────────────────────────────────────────
+
+  bool _searchVisible = false;
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+  List<int> _searchMatches = const [];
+  int _searchMatchIndex = -1; // 0-based; -1 = no matches
+
+  // ── Misc ─────────────────────────────────────────────────────────────────────
 
   // Guards against re-entrant close attempts while a dialog is showing.
   bool _closingTab = false;
@@ -119,6 +130,108 @@ class _EditorScreenState extends State<EditorScreen> {
     return (paraStart, paraEnd);
   }
 
+  // ── Find / search ────────────────────────────────────────────────────────────
+
+  /// Returns the start offset of every non-overlapping case-insensitive match
+  /// of [query] in [text].
+  static List<int> _computeMatches(String text, String query) {
+    if (query.isEmpty) return const [];
+    final lower = text.toLowerCase();
+    final qLower = query.toLowerCase();
+    final matches = <int>[];
+    var i = 0;
+    while (true) {
+      final idx = lower.indexOf(qLower, i);
+      if (idx == -1) break;
+      matches.add(idx);
+      i = idx + qLower.length;
+    }
+    return matches;
+  }
+
+  void _openSearch() {
+    if (_aiPromptVisible || _diffVisible) return;
+    // If already open, just focus the field (Ctrl+F = re-focus if visible).
+    if (_searchVisible) {
+      _searchFocusNode.requestFocus();
+      return;
+    }
+    // Compute fresh matches for the current tab content.
+    final query = _searchController.text;
+    final matches = query.isEmpty
+        ? const <int>[]
+        : _computeMatches(_state.activeTab.controller.text, query);
+    setState(() {
+      _searchVisible = true;
+      _searchMatches = matches;
+      _searchMatchIndex = matches.isEmpty ? -1 : 0;
+    });
+    if (matches.isNotEmpty) {
+      _jumpToMatch(0);
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _searchFocusNode.requestFocus();
+      });
+    }
+  }
+
+  void _closeSearch() {
+    // Collapse the selection to a cursor so the match highlight disappears.
+    final ctrl = _state.activeTab.controller;
+    final offset = ctrl.selection.baseOffset.clamp(0, ctrl.text.length);
+    ctrl.selection = TextSelection.collapsed(offset: offset);
+    setState(() {
+      _searchVisible = false;
+      _searchMatches = const [];
+      _searchMatchIndex = -1;
+    });
+    _editorFocusNode.requestFocus();
+  }
+
+  void _onSearchQueryChanged(String query) {
+    final matches = _computeMatches(_state.activeTab.controller.text, query);
+    setState(() {
+      _searchMatches = matches;
+      _searchMatchIndex = matches.isEmpty ? -1 : 0;
+    });
+    if (matches.isNotEmpty) {
+      _jumpToMatch(0);
+    } else {
+      _searchFocusNode.requestFocus();
+    }
+  }
+
+  void _nextMatch() {
+    if (_searchMatches.isEmpty) return;
+    final next = (_searchMatchIndex + 1) % _searchMatches.length;
+    setState(() => _searchMatchIndex = next);
+    _jumpToMatch(next);
+  }
+
+  void _prevMatch() {
+    if (_searchMatches.isEmpty) return;
+    final prev =
+        (_searchMatchIndex - 1 + _searchMatches.length) % _searchMatches.length;
+    setState(() => _searchMatchIndex = prev);
+    _jumpToMatch(prev);
+  }
+
+  /// Highlights [index] in the editor by setting the selection, briefly gives
+  /// the editor focus so EditableText scrolls to the selection, then returns
+  /// focus to the find bar.
+  void _jumpToMatch(int index) {
+    final start = _searchMatches[index];
+    final end = start + _searchController.text.length;
+    _state.activeTab.controller.selection = TextSelection(
+      baseOffset: start,
+      extentOffset: end,
+    );
+    _editorFocusNode.requestFocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _searchVisible) _searchFocusNode.requestFocus();
+    });
+  }
+
   // ── Lifecycle ───────────────────────────────────────────────────────────────
 
   @override
@@ -140,21 +253,28 @@ class _EditorScreenState extends State<EditorScreen> {
     _state.removeListener(_onEditorStateChanged);
     _editorFocusNode.dispose();
     _diffFocusNode.dispose();
+    _searchController.dispose();
+    _searchFocusNode.dispose();
     _piRpcService.dispose();
     super.dispose();
   }
 
   void _onEditorStateChanged() {
     setState(() {});
-    // Restore focus to the editor after every structural change.
-    // Mouse clicks on tab chips and buttons clear focus from the TextField
-    // (Flutter desktop clears focus on clicks to non-focusable areas).
-    // The post-frame callback ensures _editorFocusNode is settled before
-    // requesting focus. Safe for keyboard shortcuts too: without ValueKey,
-    // _editorFocusNode stays attached to the same element the whole time,
-    // so calling requestFocus on an already-focused node is a no-op.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !_aiPromptVisible && !_diffVisible) {
+      if (!mounted) return;
+      if (_searchVisible) {
+        // Re-run search against the new tab's content and keep focus in the
+        // find bar. _jumpToMatch (called by _onSearchQueryChanged when matches
+        // exist) handles the editor→search focus dance for scrolling.
+        _onSearchQueryChanged(_searchController.text);
+      } else if (!_aiPromptVisible && !_diffVisible) {
+        // Restore focus to the editor after every structural change.
+        // Mouse clicks on tab chips and buttons clear focus from the TextField
+        // (Flutter desktop clears focus on clicks to non-focusable areas).
+        // Safe for keyboard shortcuts too: without ValueKey, _editorFocusNode
+        // stays attached to the same element the whole time, so calling
+        // requestFocus on an already-focused node is a no-op.
         _editorFocusNode.requestFocus();
       }
     });
@@ -629,6 +749,8 @@ class _EditorScreenState extends State<EditorScreen> {
             SaveAsIntent(),
         SingleActivator(LogicalKeyboardKey.keyK, control: true):
             OpenAiPromptIntent(),
+        SingleActivator(LogicalKeyboardKey.keyF, control: true):
+            OpenSearchIntent(),
         // Escape cancels the in-flight AI request before the diff opens.
         // When the diff IS open, AiDiffView's inner Shortcuts intercept Escape
         // first (for Reject), so this binding is only reachable during loading.
@@ -653,6 +775,9 @@ class _EditorScreenState extends State<EditorScreen> {
           ),
           OpenAiPromptIntent: CallbackAction<OpenAiPromptIntent>(
             onInvoke: (_) => _openAiPrompt(),
+          ),
+          OpenSearchIntent: CallbackAction<OpenSearchIntent>(
+            onInvoke: (_) => _openSearch(),
           ),
           CancelAiIntent: CallbackAction<CancelAiIntent>(
             onInvoke: (_) {
@@ -742,6 +867,19 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                 ),
               ],
+
+              // Find bar — shown between the sub-header area and the editor.
+              if (_searchVisible)
+                FindBar(
+                  controller: _searchController,
+                  focusNode: _searchFocusNode,
+                  matchCount: _searchMatches.length,
+                  matchIndex: _searchMatchIndex,
+                  onQueryChanged: _onSearchQueryChanged,
+                  onNext: _nextMatch,
+                  onPrev: _prevMatch,
+                  onClose: _closeSearch,
+                ),
 
               // Editor area + overlays
               Expanded(

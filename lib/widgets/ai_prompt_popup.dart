@@ -122,6 +122,8 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
             DoNothingAndStopPropagationIntent(),
         SingleActivator(LogicalKeyboardKey.keyK, control: true):
             DoNothingAndStopPropagationIntent(),
+        SingleActivator(LogicalKeyboardKey.keyF, control: true):
+            DoNothingAndStopPropagationIntent(),
       },
       child: Align(
         alignment: Alignment.topCenter,

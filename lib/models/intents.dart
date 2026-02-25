@@ -36,3 +36,7 @@ class RejectDiffIntent extends Intent {
 class CancelAiIntent extends Intent {
   const CancelAiIntent();
 }
+
+class OpenSearchIntent extends Intent {
+  const OpenSearchIntent();
+}
