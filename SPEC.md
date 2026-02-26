@@ -315,11 +315,11 @@ class EditorState extends ChangeNotifier {
 
 **Three separate reactive layers — each rebuilds only what it owns:**
 
-| Layer        | Type                             | What listens                                    | Triggered by                            |
-| ------------ | -------------------------------- | ----------------------------------------------- | --------------------------------------- |
-| Text content | `TextEditingController`          | Editor area (directly, no rebuild needed)       | Every keystroke                         |
-| Dirty state  | `ValueNotifier<bool>` per tab    | That tab's chip only (`ValueListenableBuilder`) | Every keystroke                         |
-| Structure    | `EditorState` (`ChangeNotifier`) | Tab bar layout, screen scaffold                 | Tab add/close/switch, title/path change |
+| Layer        | Type                                                        | What listens                                    | Triggered by                            |
+| ------------ | ----------------------------------------------------------- | ----------------------------------------------- | --------------------------------------- |
+| Text content | `HighlightingController` (`TextEditingController` subclass) | Editor area (directly, no rebuild needed)       | Every keystroke                         |
+| Dirty state  | `ValueNotifier<bool>` per tab                               | That tab's chip only (`ValueListenableBuilder`) | Every keystroke                         |
+| Structure    | `EditorState` (`ChangeNotifier`)                            | Tab bar layout, screen scaffold                 | Tab add/close/switch, title/path change |
 
 **Controller listener pattern:** When a tab is created, `EditorState` attaches a listener to its `controller` that updates `isDirtyNotifier` only — it does **not** call `notifyListeners()`. `EditorState.notifyListeners()` is reserved exclusively for structural changes. When a tab is closed, the listener is removed and `tab.dispose()` is called.
 
@@ -511,7 +511,7 @@ Offset `0` is always valid (start of text) and causes `EditableText` to render t
 
 ```
 lib/
-  main.dart                    # Entry point, MaterialApp, Shortcuts/Actions root
+  main.dart                    # Entry point, app bootstrap, session restore + lifecycle wiring
   models/
     editor_tab.dart            # EditorTab model
   state/
@@ -1167,7 +1167,6 @@ Cycle order: `off → low → medium → high → off → …`
 #### Checklist
 
 - [x] `EditorScreen._submitAiPrompt`: change `editTarget` to `''` when `sel.isCollapsed`
-- [x] `EditorScreen._submitAiPrompt`: change `editTarget` to `''` when `sel.isCollapsed`
 - [x] `EditorScreen._acceptDiff`: when `sel.isCollapsed`, insert at cursor (`docText.substring(0, sel.start) + result + docText.substring(sel.start)`)
 - [x] `PiRpcService.streamEdit`: when `editTarget` is empty, send insert-mode prompt (before/after cursor context); otherwise send existing edit-mode prompt
 
@@ -1322,10 +1321,10 @@ Cycle order: `off → low → medium → high → off → …`
 
 #### Changes
 
-| File                 | What changes                                                                                                                                 |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| File                  | What changes                                                                                                                                |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `models/intents.dart` | Add `MoveLineUpIntent`, `MoveLineDownIntent`                                                                                                |
-| `editor_screen.dart` | Add `_moveLines(int direction)`; register `Alt+↑`/`Alt+↓` in `Shortcuts`; add `MoveLineUpIntent` and `MoveLineDownIntent` `Actions` entries |
+| `editor_screen.dart`  | Add `_moveLines(int direction)`; register `Alt+↑`/`Alt+↓` in `Shortcuts`; add `MoveLineUpIntent` and `MoveLineDownIntent` `Actions` entries |
 
 #### Checklist
 
