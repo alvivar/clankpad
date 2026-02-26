@@ -40,3 +40,11 @@ class CancelAiIntent extends Intent {
 class OpenSearchIntent extends Intent {
   const OpenSearchIntent();
 }
+
+class MoveLineUpIntent extends Intent {
+  const MoveLineUpIntent();
+}
+
+class MoveLineDownIntent extends Intent {
+  const MoveLineDownIntent();
+}

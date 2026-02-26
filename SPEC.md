@@ -48,6 +48,7 @@ Clankpad is a simple desktop app: one window, a tab bar, and a text area. No dis
 - Monospaced font.
 - **Word wrap on by default.** Vertical scroll when content exceeds the screen height.
 - The area fills all available space below the tab bar.
+- **Move line** _(Phase 3.20)_: `Alt+↑` / `Alt+↓` moves the current line (or the entire block of selected lines) up or down by one, swapping with the adjacent line. Cursor / selection follows. No-op at the first or last line. Blocked while the editor is read-only (AI active).
 - _(Phase 4)_ No-wrap + horizontal scroll mode. Flutter's `TextField` does not support this natively; implementing it may require a dedicated editor package (e.g. `re_editor`). `Alt+Z` will toggle between wrap and no-wrap once implemented.
 
 ### 2.3 Open File _(Phase 2)_
@@ -1312,6 +1313,27 @@ Cycle order: `off → low → medium → high → off → …`
 - [x] `EditorScreen._acceptDiff`: use `_snapshotTab.controller` instead of `activeTab.controller`
 - [x] `EditorScreen._rejectDiff`: use `_snapshotTab.controller` instead of `activeTab.controller`
 - [x] `EditorScreen._dismissAiPrompt`: use `_snapshotTab.controller` instead of `activeTab.controller`
+
+---
+
+### Phase 3.20 — Move line (`Alt+↑` / `Alt+↓`)
+
+**End state:** `Alt+↑` moves the current line (or selected block) up one position; `Alt+↓` moves it down. The cursor or selection travels with the moved lines. No-op at document boundaries. Blocked while the editor is read-only.
+
+#### Changes
+
+| File                 | What changes                                                                                                                                 |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `models/intents.dart` | Add `MoveLineUpIntent`, `MoveLineDownIntent`                                                                                                |
+| `editor_screen.dart` | Add `_moveLines(int direction)`; register `Alt+↑`/`Alt+↓` in `Shortcuts`; add `MoveLineUpIntent` and `MoveLineDownIntent` `Actions` entries |
+
+#### Checklist
+
+- [x] `intents.dart`: add `MoveLineUpIntent`, `MoveLineDownIntent`
+- [x] `EditorScreen._moveLines`: split text by `\n`; identify `firstLine`/`lastLine` from selection; swap adjacent line; apply uniform `delta` to `baseOffset` and `extentOffset`
+- [x] `EditorScreen._moveLines`: guard — no-op if editor not focused, read-only, or at boundary
+- [x] `EditorScreen`: register `SingleActivator(arrowUp, alt: true)` → `MoveLineUpIntent` and `SingleActivator(arrowDown, alt: true)` → `MoveLineDownIntent` in `Shortcuts`
+- [x] `EditorScreen`: add `MoveLineUpIntent` and `MoveLineDownIntent` handlers in `Actions`
 
 ---
 
