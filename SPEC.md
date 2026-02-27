@@ -72,6 +72,9 @@ The UI is one screen:
 - Below it, optional transient bars (error banner, AI progress + cancel row, find bar).
 - The editor area fills the rest of the window.
 - AI popup and diff UI render as overlays at the top-center of the editor area.
+- On startup, window size is set to `80%` width × `90%` height of the current platform work area and centered.
+  - Windows: primary monitor `rcWork` (taskbar excluded).
+  - macOS: `visibleFrame` (menu bar + Dock excluded).
 
 ### 2.2 Tabs
 
@@ -580,6 +583,7 @@ These are practical “black box” scenarios to validate a compatible implement
 22. Reject diff → text stays unchanged and focus returns to editor.
 23. While AI is loading (before diff opens), press Escape → request cancels and editor unlocks.
 24. If `pi` is not installed → Ctrl+K submit shows error banner about installing Pi.
+25. On launch, window opens centered at about 80% width × 90% height of usable screen area (excluding taskbar/menu bar/dock).
 
 ---
 
