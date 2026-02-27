@@ -356,7 +356,7 @@ Reject:
 - Failures (Pi not found, Pi crashes, retry exhaustion, etc.) show as a dismissible error banner below the tab bar.
 - The editor unlocks immediately on error.
 
-**Known edge case in current implementation:** if Pi completes without emitting any `text_delta` chunks, the diff view never opens.
+If Pi completes without emitting any `text_delta` chunks, Clankpad still opens the diff view with an empty proposed result so the user can explicitly accept or reject.
 
 ---
 

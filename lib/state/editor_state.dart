@@ -143,7 +143,9 @@ class EditorState extends ChangeNotifier {
   void loadFileIntoTab(String filePath, String title, String content) {
     final active = _tabs[_activeTabIndex];
     final reuseActive =
-        active.filePath == null && active.controller.text.isEmpty;
+        active.filePath == null &&
+        active.controller.text.isEmpty &&
+        !active.isDirty;
 
     if (reuseActive) {
       active.filePath = filePath;

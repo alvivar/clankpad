@@ -667,6 +667,22 @@ class _EditorScreenState extends State<EditorScreen> {
           setState(() => _diffProposed += chunk);
         }
       }
+
+      // If Pi completed without emitting any text_delta chunks, still open the
+      // diff so the user can deterministically accept/reject an empty result.
+      // Skip this when the user cancelled during loading (_editorReadOnly=false).
+      if (!diffOpened && mounted && _editorReadOnly) {
+        diffOpened = true;
+        setState(() {
+          _diffVisible = true;
+          _diffEditTarget = editTarget;
+          _diffProposed = '';
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _diffFocusNode.requestFocus();
+        });
+      }
+
       // Stream completed normally. Surface a non-fatal model-switch warning
       // if Pi rejected set_model / set_thinking_level (prompt still ran).
       final switchErr = _piRpcService.lastModelSwitchError;
