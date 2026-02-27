@@ -46,3 +46,6 @@ app.*.map.json
 
 # Local agent/editor settings
 .claude/
+
+# Temp
+.tmp/

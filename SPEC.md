@@ -1,262 +1,589 @@
-# Clankpad — Specification
+# Clankpad — Specification (current implementation)
 
-A minimalist Notepad-style text editor with multi-tab support, built in Flutter for desktop (Windows as primary target).
+Clankpad is a minimalist Notepad-style text editor with multi-tab support, built in Flutter for desktop (Windows as primary target).
+
+This document describes the current behavior and structure of the implementation in `lib/`. It is written so the system can be replicated.
+
+- The **main sections** describe user-visible behavior, invariants, storage formats, keyboard shortcuts, and the required AI backend contract.
+- The **appendices** keep Flutter implementation notes, focus deep-dives, project layout, and the historical phase log/checklists.
+
+---
+
+## Table of contents
+
+- 1. Overview
+- 2. User experience and behavior
+  - 2.1 Window layout
+  - 2.2 Tabs
+  - 2.3 Editor area
+  - 2.4 Keyboard shortcuts (canonical map)
+  - 2.5 File open/save behavior
+  - 2.6 Session persistence (hot exit)
+  - 2.7 Find (Ctrl+F)
+  - 2.8 Inline AI edit (Ctrl+K)
+- 3. Data formats
+  - 3.1 Session file location
+  - 3.2 `session.json` structure and semantics
+- 4. Pi RPC integration (required)
+  - 4.1 Prerequisites
+  - 4.2 Process lifecycle
+  - 4.3 Commands and events used
+  - 4.4 Prompt formats (edit vs insert)
+  - 4.5 Model list + enabledModels filtering
+- 5. Acceptance scenarios (behavioral tests)
+- Appendix A — Reference UI structure
+- Appendix B — Data model (Flutter)
+- Appendix C — Architecture notes (Flutter)
+- Appendix D — Focus & input correctness deep dive (Flutter)
+- Appendix E — Project file structure
+- Appendix F — Development phase log (historical)
+- Appendix G — Dependencies
 
 ---
 
 ## 1. Overview
 
-Clankpad is a simple desktop app: one window, a tab bar, and a text area. No distractions. The basic flow is:
+Clankpad is a simple desktop app: one window, a tab bar, and a text area.
+
+Basic flow:
 
 - On launch, one empty tab is ready to type in.
 - The user can create more tabs, write in each one, save, open files, and close tabs.
-- When the app is closed and reopened, all tabs are restored exactly as they were (including unsaved content).
+- When the app is closed and reopened, all tabs are restored (including unsaved content) from a local session file.
+- Inline AI edits are powered by **Pi RPC**. Pi is required for a compatible Clankpad implementation.
+
+Out of scope in the current implementation:
+
+- Rich text / formatting
+- No-wrap + horizontal scrolling mode
+- Menu bar (File menu)
+- Font size UI
+- Native per-selection popup positioning (the AI popup is always top-center)
 
 ---
 
-## 2. Features
+## 2. User experience and behavior
 
-### 2.1 Tabs
+### 2.1 Window layout
 
-| Action           | Description                                                                                                      |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `Ctrl+N`         | Creates a new empty tab                                                                                          |
-| Click `+`        | Creates a new empty tab (mouse-friendly alternative to `Ctrl+N`)                                                 |
-| Click on tab     | Switches to that tab                                                                                             |
-| `Ctrl+W`         | Closes the active tab (prompts confirmation if there are unsaved changes)                                        |
-| Click `×` on tab | Closes that tab (prompts confirmation if there are unsaved changes)                                              |
-| Tab title        | Shows the file name; if no file is assigned, shows `Untitled N` with an ever-incrementing counter (never reused) |
-| Dirty indicator  | A dot `●` in the title when there are unsaved changes                                                            |
+The UI is one screen:
 
-**Tab bar overflow:** When tabs exceed the available width, the tab bar scrolls horizontally.
+- A horizontally scrollable tab bar at the top.
+- Below it, optional transient bars (error banner, AI progress + cancel row, find bar).
+- The editor area fills the rest of the window.
+- AI popup and diff UI render as overlays at the top-center of the editor area.
 
-**Untitled counter:** The counter increments globally and is never reused. Closing "Untitled 2" and opening a new tab produces "Untitled 3", not "Untitled 2" again.
+### 2.2 Tabs
 
-**Rule:** If the last tab is closed, the app automatically creates a new empty tab (there is always at least one tab).
+Tabs are the core unit of editing.
 
-**Closing a dirty tab — confirmation dialog:**
+**Actions**
 
-- _(Phase 1)_ Two options: **Don't Save** and **Cancel**. File I/O is not available yet, so Save is not offered.
-- _(Phase 2)_ Three options: **Save**, **Don't Save**, **Cancel**.
-    - **Save** — saves the file (opens "Save As" if no path) then closes the tab.
-    - **Don't Save** — discards changes and closes the tab.
-    - **Cancel** — dismisses the dialog, tab remains open.
+| Action | How | Result |
+|---|---|---|
+| New tab | `Ctrl+N` or `+` button | Adds a new untitled tab and activates it |
+| Switch tab | Click a tab | Activates that tab |
+| Close tab | `Ctrl+W` (active tab) or click `×` on a tab | Closes that tab; prompts if dirty |
 
-### 2.2 Text Area
+**Title rules**
 
-- Plain text editor (no formatting).
-- Monospaced font.
-- **Word wrap on by default.** Vertical scroll when content exceeds the screen height.
-- The area fills all available space below the tab bar.
-- **Move line** _(Phase 3.20)_: `Alt+↑` / `Alt+↓` moves the current line (or the entire block of selected lines) up or down by one, swapping with the adjacent line. Cursor / selection follows. No-op at the first or last line. Blocked while the editor is read-only (AI active).
-- _(Phase 4)_ No-wrap + horizontal scroll mode. Flutter's `TextField` does not support this natively; implementing it may require a dedicated editor package (e.g. `re_editor`). `Alt+Z` will toggle between wrap and no-wrap once implemented.
+- If the tab is file-backed, the title is the file name (last path segment).
+- If the tab is not file-backed, the title is `Untitled N`.
+- `N` is a global ever-incrementing counter that is never reused.
 
-### 2.3 Open File _(Phase 2)_
+**Dirty indicator**
 
-| Action   | Method                                                                                             |
-| -------- | -------------------------------------------------------------------------------------------------- |
-| `Ctrl+O` | Opens the system file picker dialog                                                                |
-| Behavior | If the active tab is empty and clean → load the file there. Otherwise → open the file in a new tab |
+- A dot `●` is shown on the tab when the tab is dirty (its current text differs from its last saved content).
 
-### 2.4 Save File _(Phase 2)_
+**Always-at-least-one-tab rule**
 
-| Action         | Method                                                      |
-| -------------- | ----------------------------------------------------------- |
-| `Ctrl+S`       | Saves the current file. If it has no path → opens "Save As" |
-| `Ctrl+Shift+S` | Always opens "Save As" (allows changing name/location)      |
+- Closing the last remaining tab automatically creates a new empty untitled tab.
 
-### 2.5 File I/O Edge Cases _(Phase 2)_
+**Closing a dirty tab**
 
-**Opening a file already open in another tab:**
-Before opening, scan `tabs` for an existing entry with the same file. If found, switch to that tab instead of opening a duplicate. Prevents two tabs silently diverging on the same file.
+If a tab is dirty, closing it shows a blocking dialog with three options:
 
-Path comparison must be **normalized**: use `File(path).absolute.path.toLowerCase()` on both sides before comparing. This handles `C:\x\y` vs `c:/x/y` vs relative paths resolving to the same file on Windows.
+- **Save**
+  - If the tab already has a `filePath`, the file is written to disk.
+  - If the tab has no `filePath`, a system “Save As” dialog opens.
+  - If the save succeeds, the tab closes.
+  - If the save fails or the user cancels Save As, the tab remains open.
+- **Don’t Save**: closes the tab and discards changes.
+- **Cancel**: does nothing; tab remains open.
 
-**Save failure (permissions, locked file, disk full, etc.):**
-Show a modal error dialog with the system error message and an OK button. Do not update `savedContent`, do not clear `isDirty`. The tab stays open and dirty. The user must explicitly acknowledge the failure.
+### 2.3 Editor area
 
-**Restore: session has a `filePath` but the file no longer exists on disk:**
+- The editor is plain text (no formatting).
+- Font is monospaced (`Consolas`).
+- Word wrap is enabled.
+- Vertical scrolling is enabled.
+- The editor fills the available space below the tab bar and any transient bars.
 
-- **Tab was dirty (content stored in session):** Restore the content into the controller, keep `filePath` set (so the user knows where it was), mark the tab dirty. Show a one-time startup notice: _"⚠ [filename] not found at its original path — content restored from last session."_ The user can save it to a new location via Save As.
-- **Tab was clean (no content stored in session):** Nothing to restore. Skip the tab silently and show a one-time startup notification: _"[filename] could not be restored — file no longer exists."_ Do not open an empty placeholder tab.
+**Read-only locking during AI**
 
-### 2.6 Session Persistence _(Phase 3)_
+- While an AI request is running, the editor becomes read-only.
+- While the AI diff view is visible, the editor remains read-only.
 
-Clankpad implements a **hot exit**: closing the app never causes data loss.
+**Move line / block**
 
-- On every meaningful change (text edit, tab open/close, active tab switch), a session save is **scheduled**.
-- Saves are **debounced at 500ms**: a `dart:async` `Timer` is cancelled and restarted on each change. The write only fires 500ms after the last change, so continuous typing never hammers the disk.
-- Saves are **atomic**: the session is written to `session.json.tmp` first, then renamed to `session.json` via `File.rename`. Since rename is atomic on NTFS, a crash mid-write can never corrupt the session file — the previous `session.json` remains intact until the new one is fully written.
-- On **app close**, the pending debounce timer (if any) is cancelled and a **synchronous flush** is performed immediately before exit. The Flutter-idiomatic hook for this is `AppLifecycleListener.onExitRequested`: flush the session, then return `AppExitResponse.exit`. Note: force-close (Task Manager, SIGKILL) bypasses this callback — that's acceptable, as the debounced writes already minimize the exposure window.
-- On launch, if `session.json` exists, all tabs are restored: their content, file paths, titles, and which tab was active.
+- `Alt+↑` moves the current line, or the entire block of selected lines, up by one line (swap with the line above).
+- `Alt+↓` moves the current line, or the entire block of selected lines, down by one line (swap with the line below).
+- Cursor/selection moves along with the moved text.
+- It’s a no-op at the first/last line boundary.
+- It’s blocked while the editor is read-only.
 
-**What gets stored per tab:**
+### 2.4 Keyboard shortcuts (canonical map)
 
-| Tab state               | `content` stored?                 | `savedContent` stored?                                   |
-| ----------------------- | --------------------------------- | -------------------------------------------------------- |
-| File-backed, **clean**  | No — re-read from disk on restore | No — disk content becomes baseline                       |
-| File-backed, **dirty**  | Yes — preserves unsaved edits     | Yes — needed to correctly recompute `isDirty` on restore |
-| Untitled (no file path) | Yes — always                      | Yes — always                                             |
+This is the canonical shortcut list for the current implementation.
 
-**Restore logic:**
+#### App-level shortcuts (active when the editor screen is active)
 
-1. If the `content` key exists in the session entry → set the controller to that text. Use `savedContent` to recompute `isDirty`.
-2. If the `content` key is absent → read from `filePath` on disk. That becomes both the controller text and `savedContent` (clean state).
-3. If `filePath` no longer exists or is unreadable → fall back to stored `content` if the key exists; otherwise skip the tab (see missing-file edge cases in §2.5).
+| Shortcut | Action |
+|---|---|
+| `Ctrl+N` | New tab |
+| `Ctrl+W` | Close active tab (with dirty prompt) |
+| `Ctrl+O` | Open file |
+| `Ctrl+S` | Save (no-op if the file is already clean) |
+| `Ctrl+Shift+S` | Save As |
+| `Ctrl+F` | Open/find focus the find bar |
+| `Ctrl+K` | Open the AI prompt popup |
+| `Alt+↑` | Move line/block up |
+| `Alt+↓` | Move line/block down |
+| `Escape` | Cancel in-flight AI request **only while loading and before diff opens** |
 
-**Post-restore fixup (after all tabs are processed):**
+#### Find bar shortcuts (while the find field has focus)
 
-1. **Min-1-tab rule:** if all tabs were skipped and the list is empty, create one fresh empty tab.
-2. **Clamp `activeTabIndex`:** set to `min(storedIndex, tabs.length - 1)`. Must run after step 1 so the list is never empty when clamping.
+| Shortcut | Action |
+|---|---|
+| `Enter` or `F3` | Next match |
+| `Shift+Enter` or `Shift+F3` | Previous match |
+| `Escape` | Close find bar |
 
-### 2.7 Inline AI Edit (`Ctrl+K`)
+#### AI prompt popup shortcuts (while the popup text field has focus)
 
-A lightweight inline prompt popup, inspired by Cursor's inline edit feature.
+| Shortcut | Action |
+|---|---|
+| `Enter` | Submit prompt |
+| `Shift+Enter` | Insert newline in prompt |
+| `Escape` | Dismiss popup |
+| `↑` / `↓` | Prompt history navigation (only when caret is on first/last line) |
+| `Ctrl+P` | Cycle model forward (if model list is loaded) |
+| `Shift+Tab` | Cycle thinking level forward (only if effective model supports reasoning) |
 
-**Trigger:**
+While the AI prompt popup is open, app-level shortcuts like `Ctrl+N`, `Ctrl+W`, `Ctrl+O`, `Ctrl+S`, `Ctrl+K`, `Ctrl+F` are blocked from reaching the root shortcut layer.
 
-- `Ctrl+K` with text selected → opens the popup in **edit mode**; the selected text is the **edit target**; the AI output replaces it.
-- `Ctrl+K` with no selection on a **non-blank line** → the surrounding paragraph is auto-selected → edit mode (same as a manual selection of that paragraph).
-- `Ctrl+K` with no selection on a **blank line** → opens the popup in **insert mode**; the AI output is **inserted at the cursor position**.
+#### AI diff view shortcuts
 
-**Popup behavior:**
+| Shortcut | Action |
+|---|---|
+| `Tab` or `Ctrl+Enter` | Accept proposed edit |
+| `Escape` | Reject proposed edit |
 
-- A floating card appears anchored to the **top-center of the editor area** (via `Stack` + `Overlay`), regardless of selection position. This avoids the complexity of computing pixel-level selection coordinates in Flutter.
-- The user types a natural-language prompt (e.g. _"make this more formal"_, _"fix the grammar"_).
-- `Enter` submits the prompt; the popup closes and the result is applied.
-- `Shift+Enter` inserts a newline inside the prompt field.
-- `Escape` dismisses the popup with no action.
+While the diff view is focused, app-level shortcuts are blocked.
 
-**Enter/Shift+Enter — explicit key handling required.** On desktop, `TextField` treats `Enter` as a newline like any other key — it does not submit. The popup must intercept via `Focus.onKeyEvent`:
+### 2.5 File open/save behavior
 
-- `Enter` (no modifiers) → call submit; mark event as `KeyEventResult.handled`.
-- `Shift+Enter` → return `KeyEventResult.ignored` so the event reaches the `TextField` (inserts newline).
-- `Escape` → dismiss popup; mark event as `KeyEventResult.handled`.
-- All other keys → return `KeyEventResult.ignored` and pass through normally. This keeps `Ctrl+C/V/X/A/Z` fully functional inside the prompt field.
+Clankpad uses native file dialogs via `file_selector`.
 
-Do not assume `TextField`'s `onSubmitted` will fire on desktop in a multiline field — it won't.
+#### Open (`Ctrl+O`)
 
-**Blocking app-level shortcuts while the popup is open.** Wrap the popup widget with a local `Shortcuts` that maps only the specific root-registered app combos to `DoNothingAndStopPropagationIntent`. This prevents them from bubbling up to the root layer without interfering with any other key. `Ctrl+C/V/X/A/Z` are handled internally by Flutter's `EditableText` and never reach the root layer regardless — they need no special treatment.
+- Opens a system file picker.
+- If the selected file is already open in any tab (path-normalized comparison), Clankpad switches to that existing tab instead of opening a duplicate.
+- Otherwise, Clankpad reads the file from disk:
+  - If the active tab is untitled and its current text is empty, the file is loaded into the active tab (the tab becomes file-backed).
+  - Otherwise, the file is opened in a new tab.
 
-```dart
-Shortcuts(
-  shortcuts: {
-    SingleActivator(LogicalKeyboardKey.keyN, control: true): DoNothingAndStopPropagationIntent(),
-    SingleActivator(LogicalKeyboardKey.keyW, control: true): DoNothingAndStopPropagationIntent(),
-    SingleActivator(LogicalKeyboardKey.keyO, control: true): DoNothingAndStopPropagationIntent(),
-    SingleActivator(LogicalKeyboardKey.keyS, control: true): DoNothingAndStopPropagationIntent(),
-    SingleActivator(LogicalKeyboardKey.keyS, control: true, shift: true): DoNothingAndStopPropagationIntent(),
-    SingleActivator(LogicalKeyboardKey.keyK, control: true): DoNothingAndStopPropagationIntent(),
-  },
-  child: /* popup card widget */,
-)
-```
+If reading fails, a modal error dialog is shown (`Could not open file`).
 
-**Snapshot on popup open.** When the popup opens, immediately capture and freeze:
+**Path normalization used for duplicate detection (Windows-friendly):**
 
-- `documentText` — full text of the active tab at that moment.
-- `editTarget` — the selected substring, or empty string in insert mode.
-- `selectionRange` — the `TextSelection` from the controller.
+`File(path).absolute.path.toLowerCase()`
 
-These values are passed to the AI request unchanged. They do not update if the user types while the popup is open.
+#### Save (`Ctrl+S`)
 
-**AI context:**
+- If the active tab is file-backed and clean, save is a no-op.
+- If the active tab is file-backed and dirty, Clankpad writes the current text to the existing file path.
+- If the active tab is untitled (no `filePath`), Save triggers Save As.
 
-- **Edit mode** (selection exists): the AI receives `documentText` as context and `editTarget` as the text to transform. The output replaces `editTarget`.
-- **Insert mode** (no selection, blank line): the AI receives the full document with a `[CURSOR]` marker embedded at the insertion point. The model sees the document as a coherent whole and is instructed to reply with only the text to insert — without surrounding blank lines. On accept, the editor wraps the (trimmed) result with `\n…\n`, producing a blank-line separation from both the preceding and following paragraphs.
+#### Save As (`Ctrl+Shift+S`)
 
-**Edit target highlight _(Phase 3.17)_.** When the popup opens, the edit target range is painted in the editor using `HighlightingController.setEditTarget` (`tertiaryContainer` background color) — the same focus-independent `buildTextSpan` technique as find-bar matches. The highlight persists through the loading phase and diff view so the user always has a visual anchor showing exactly what is being edited. It is cleared on dismiss, accept, or reject. For a collapsed cursor on a non-blank line the paragraph range is pre-expanded (same logic as `_submitAiPrompt`) so the highlight is accurate from the moment the popup opens. Blank-line insert mode has no range to highlight.
+- Always opens a Save As dialog.
+- Suggested file name:
+  - If the tab is file-backed: current file name.
+  - Otherwise: `Untitled N.txt` (unless the title already contains a dot, in which case it’s used as-is).
 
-**Editing locked during request.** While the AI request is in-flight, the editor `TextField` is set to `readOnly: true`. A thin linear progress indicator appears below the tab bar. On response (success or error), `readOnly` is restored. Drift detection (applying results against a changed document) is explicitly out of scope — locking is simpler and requests are short.
+**Save failure**
 
-**Structural actions locked during AI _(Phase 3.19)_.** While any AI phase is active (prompt open, streaming, or diff visible — `_aiActive`), the following actions are silently blocked to prevent the snapshot and the apply target from diverging across tabs: new tab (`Ctrl+N`), close tab (`Ctrl+W`), open file (`Ctrl+O`), tab-bar mouse clicks (switch/close/new). Save is not blocked. As a belt-and-suspenders safety net, `_snapshotTabId` is recorded when the prompt opens and used to resolve the correct tab controller in `_acceptDiff` / `_rejectDiff` / `_dismissAiPrompt`, regardless of which tab is currently active.
+If writing fails (permissions, locked file, disk full, etc.), a modal error dialog is shown (`Save failed`). The tab remains dirty.
 
-**Result (Phase 1 — simple replace):**
+### 2.6 Session persistence (hot exit)
 
-- The popup closes, then `editTarget` within the document is replaced directly with the AI output using the frozen `selectionRange`. No diff view.
+Clankpad implements “hot exit”: closing the app should not lose edits.
 
-**Result (Phase 3 — diff view):**
+- Session writes are triggered by:
+  - structural changes (new tab, close tab, switch tab, file path/title changes)
+  - text edits (while dirty or when dirty state flips)
+- Writes are debounced by 500ms.
+- Writes are atomic: write to `session.json.tmp`, then rename to `session.json`.
+- On app close, pending debounce is cancelled and the session is flushed synchronously using `AppLifecycleListener.onExitRequested`.
 
-- The popup closes, then a diff view appears inline: old text (struck through / red) vs new text (green).
-- The user can **Accept** (`Tab` or `Ctrl+Enter`) or **Reject** (`Escape`) the change.
+On launch:
 
-**Streaming _(Phase 3.7)_:**
+- If `session.json` exists and can be parsed, it is restored.
+- If the session file is missing or corrupt, startup continues with a fresh empty tab.
+- After restore, any notices (missing files, etc.) are shown as dialogs titled `Session Restore`.
 
-- `AiService` is replaced by `PiRpcService`, which spawns `pi --mode rpc` as a child process and communicates via line-delimited JSON over stdin/stdout (Pi's RPC protocol).
-- `PiRpcService.streamEdit(...)` returns a `Stream<String>` of text chunks — each chunk comes from a `message_update` event with `assistantMessageEvent.type == "text_delta"`.
-- The diff view's "After" pane updates live as chunks arrive — the user sees the response being written in real time.
-- `EditorScreen` accumulates chunks into `_diffProposed` and calls `setState` on each, keeping the diff card reactive with no additional state class.
-- A **Cancel** button (below the tab bar, replacing the progress indicator) aborts the in-flight Pi run at any point by sending `{"type": "abort"}` to Pi's stdin. `Escape` while no popup or diff is visible has the same effect.
-- Errors (Pi not found, Pi process crashed, model error reported by Pi) surface as a dismissable **error banner** below the tab bar rather than a blocking dialog. The editor unlocks immediately so the user is never stuck waiting for a button click to resume.
+Restore behavior for file-backed tabs:
 
-### 2.8 Find (`Ctrl+F`) _(Phase 3.15)_
+- If a tab entry includes `content`, that content is restored into the tab (dirty file-backed or untitled). If the backing file is missing, a warning notice is recorded.
+- If a file-backed tab entry omits `content`, Clankpad attempts to re-read the file from disk.
+  - If the read fails, the tab is skipped and a notice is recorded.
 
-A lightweight in-editor search bar for finding text within the active tab.
+After all tabs are processed:
 
-**Trigger:** `Ctrl+F` opens the search bar (or focuses it if already open). `Escape` closes it and returns focus to the editor. If the editor has a non-collapsed, single-line selection when `Ctrl+F` is pressed, that text is pre-filled into the search field (all selected, so typing immediately replaces it); multi-line selections are ignored and the previous query is preserved.
+- If all tabs were skipped and none remain, a new empty untitled tab is created.
+- The active tab index from the session is clamped to the final tab list bounds.
 
-**UI:** A thin bar that appears between the tab bar and the editor area — part of the normal layout flow, not an overlay.
+### 2.7 Find (Ctrl+F)
 
-```
-[ Search field...              ]  [ 3 of 12 ]  [↑]  [↓]  [×]
-```
+Find is a lightweight in-editor search bar.
 
-- **Search field** — grows to fill available space; `TextField` with the search query.
-- **Match counter** — `N of M` (e.g. `3 of 12`); shows `No results` when the query has no matches; hidden when the field is empty.
-- **↑ / ↓ buttons** — navigate to previous / next match; `ExcludeFocus`-wrapped so clicks do not steal focus from the search field.
-- **× button** — closes the bar; `ExcludeFocus`-wrapped.
+**UI**
 
-**Search behaviour:**
+A thin bar appears between the tab bar and the editor:
 
-- **Live** — matches recompute on every keystroke.
-- **Case-insensitive.**
-- **Non-overlapping.**
-- **Wraps around** — next from the last match goes to the first; previous from the first goes to the last.
-- On tab switch while open, the search re-runs against the new tab's content and resets to the first match.
+- Search field
+- Match counter (`N of M` or `No results`)
+- Previous / Next buttons
+- Close button
 
-**Match highlighting:** Implemented via `HighlightingController.buildTextSpan` — a `TextEditingController` subclass that overrides text rendering to paint background colors directly onto match ranges, independent of focus:
+**Behavior**
 
-- **All matches** — `colorScheme.primaryContainer` tint.
-- **Current match** — `colorScheme.primary` at 35 % opacity (more prominent).
+- Matches recompute live on each query change.
+- Case-insensitive.
+- Non-overlapping.
+- Wrap-around navigation.
+- If the editor has a non-collapsed single-line selection when opening Find, the selected text is used to pre-fill the query (and fully selected).
 
-Because the highlight is baked into the text spans rather than the Flutter selection layer, it remains visible even when the search field (not the editor) holds focus — a limitation of Flutter's `EditableText`, which only paints selection highlights for the focused widget. The editor scrolls to the current match by briefly requesting editor focus (triggering `EditableText`'s scroll-to-cursor behaviour), then returning focus to the search field.
+**Highlighting**
 
-**Keyboard shortcuts inside the search field** (via `Focus.onKeyEvent`):
+Highlighting is implemented via `HighlightingController.buildTextSpan`:
 
-| Key                        | Action         |
-| -------------------------- | -------------- |
-| `Enter` / `F3`             | Next match     |
-| `Shift+Enter` / `Shift+F3` | Previous match |
-| `Escape`                   | Close bar      |
+- All matches: `colorScheme.primaryContainer`
+- Current match: `colorScheme.primary` at 35% opacity
 
-**Focus rules:** The search field holds focus while the bar is open. Navigation (↑ / ↓ buttons and keyboard shortcuts) leaves focus in the search field. Closing the bar returns focus to the editor.
+When jumping to a match, Clankpad briefly focuses the editor to scroll to the caret position, then returns focus to the find field.
 
-**Interaction with AI popup:** `Ctrl+F` is blocked while the AI prompt popup or diff overlay is active (same mechanism as other app shortcuts — `DoNothingAndStopPropagationIntent` inside the popup's local `Shortcuts`).
+### 2.8 Inline AI edit (Ctrl+K)
 
-### 2.9 Menu Bar _(optional / Phase 4)_
+Inline AI edit is an overlay flow:
 
-`File` menu with: New, Open, Save, Save As, Close Tab, Exit.
+1. Open prompt popup (`Ctrl+K`)
+2. Type instruction
+3. Submit
+4. Stream AI output into a diff view
+5. Accept or reject
 
-### 2.10 Pi as AI Backend _(Phase 3.7)_
+**Backend requirement:** AI calls go through Pi RPC (see §4).
 
-Clankpad delegates all AI calls to **Pi** (`pi --mode rpc`), an external agent process it spawns as a child process. Clankpad never calls any model API directly — Pi owns auth, model selection, retry logic, and streaming.
+#### Trigger modes
 
-**Why Pi?**
+When the popup opens, Clankpad snapshots:
 
-- Pi already handles auth for every supported provider (Anthropic, OpenAI, Google, etc.) via its own `~/.pi/agent/settings.json` and `/login` OAuth flow. Clankpad inherits all of this for free.
-- Pi's RPC mode exposes a clean line-delimited JSON protocol over stdin/stdout — a natural fit for `dart:io`'s `Process.start`.
-- Swapping the underlying model (e.g. `claude-sonnet-4` → `gpt-4o`) requires no Clankpad code changes — only the Pi spawn arguments change.
+- the full document text
+- the current selection
+- the current tab id (used as a safety-net so accept/reject applies to the snapshotted tab)
 
-**Prerequisites:**
+Mode selection:
 
-Pi must be installed and configured on the user's machine (`npm install -g @mariozechner/pi-coding-agent`, then `pi /login` or API key set). Clankpad does not manage Pi's configuration. If `pi` is not on `PATH`, a settings field will allow specifying an absolute path.
+- If there is an explicit non-collapsed selection, that selection is the edit target.
+- If the selection is collapsed:
+  - If the caret is on a non-blank line, Clankpad expands the edit target to the surrounding paragraph (a maximal run of consecutive non-blank lines).
+  - If the caret is on a blank line, Clankpad uses insert mode (no edit target).
 
-**No API key in Clankpad.** Auth lives entirely in Pi's config. Clankpad has no `config.json`, no key dialog, no key rotation UI.
+#### Popup behavior
+
+- The popup is a floating card, anchored top-center of the editor area.
+- `Enter` submits.
+- `Shift+Enter` inserts a newline in the prompt.
+- `Escape` dismisses.
+- While the popup is open, root-level shortcuts like `Ctrl+N/Ctrl+W/Ctrl+O/Ctrl+S/Ctrl+K/Ctrl+F` are blocked from bubbling up to the app.
+- While any AI phase is active (popup open, request streaming, or diff visible), structural actions are blocked to keep the snapshot/apply target stable:
+  - New tab, close tab, open file
+  - Tab-bar switching/closing/`+` button
+  - (Save is still allowed.)
+- Find (`Ctrl+F`) is blocked while the popup or diff is visible; during the loading state (before the diff opens) it can still be opened.
+
+Prompt history:
+
+- Up/Down cycles through previously submitted prompts (in-memory only).
+- History is capped at 50 entries.
+- Consecutive duplicates are not added.
+
+#### Request / streaming
+
+After submit:
+
+- The popup closes.
+- The editor becomes read-only.
+- A linear progress indicator is shown below the tab bar, plus a Cancel button.
+- Pi output is streamed; the diff view opens on the first received text chunk.
+
+Cancel behavior:
+
+- Cancel (button or `Escape`) aborts Pi and immediately unlocks the editor.
+- Cancel is only available before the diff view opens.
+
+#### Diff view
+
+- Shows “Before” (edit target) and “After” (proposed) side-by-side.
+- Proposed text updates live as chunks stream.
+
+Accept:
+
+- If edit mode: replace the edit target range in the snapshotted document with the proposed text.
+- If insert mode: insert the proposed text at the cursor location, wrapped with a newline on each side (`"\n" + proposed.trim() + "\n"`).
+- After accept, focus returns to the editor.
+
+Reject:
+
+- Leaves document unchanged.
+- Aborts Pi if streaming is still ongoing.
+- Focus returns to the editor.
+
+#### Error handling
+
+- Failures (Pi not found, Pi crashes, retry exhaustion, etc.) show as a dismissible error banner below the tab bar.
+- The editor unlocks immediately on error.
+
+**Known edge case in current implementation:** if Pi completes without emitting any `text_delta` chunks, the diff view never opens.
 
 ---
 
-## 3. UI Structure
+## 3. Data formats
 
+### 3.1 Session file location
+
+- Windows: `%APPDATA%\Clankpad\session.json`
+- Other platforms: current working directory (`./session.json`)
+
+A temporary file is used during atomic writes:
+
+- `session.json.tmp`
+
+### 3.2 `session.json` structure and semantics
+
+Top-level keys:
+
+- `activeTabIndex` (int)
+- `nextTabId` (int)
+- `untitledCounter` (int)
+- `tabs` (list)
+
+Per-tab entry keys:
+
+- `id` (int)
+- `title` (string)
+- `filePath` (string or null)
+- `content` (string, optional)
+- `savedContent` (string, optional)
+
+Rules:
+
+- Untitled tabs (`filePath: null`): always store `content` and `savedContent`.
+- File-backed tabs:
+  - If dirty: store `content` and `savedContent`.
+  - If clean: omit both `content` and `savedContent` entirely (missing key is the signal).
+
+Example:
+
+```json
+{
+  "activeTabIndex": 1,
+  "nextTabId": 6,
+  "untitledCounter": 4,
+  "tabs": [
+    {
+      "id": 3,
+      "title": "Untitled 3",
+      "filePath": null,
+      "content": "some unsaved text...",
+      "savedContent": ""
+    },
+    {
+      "id": 4,
+      "title": "notes.txt",
+      "filePath": "C:/Users/user/Documents/notes.txt"
+    },
+    {
+      "id": 5,
+      "title": "draft.txt",
+      "filePath": "C:/Users/user/Documents/draft.txt",
+      "content": "edited but not yet saved...",
+      "savedContent": "original saved text"
+    }
+  ]
+}
+```
+
+---
+
+## 4. Pi RPC integration (required)
+
+Clankpad delegates all AI calls to **Pi** (`pi --mode rpc`), spawned as a child process. Clankpad does not call any model APIs directly.
+
+### 4.1 Prerequisites
+
+- Pi must be installed and configured on the user’s machine.
+- Default expectation: `pi` is available on `PATH`.
+- Pi owns authentication and model configuration (Clankpad has no API key UI).
+
+Install example:
+
+- `npm install -g @mariozechner/pi-coding-agent`
+- then `pi /login` (or configure API keys via Pi)
+
+### 4.2 Process lifecycle
+
+- Pi is spawned on first use (or when pre-warmed on popup open).
+- Pi is kept alive (“warm”) between requests.
+- If Pi exits unexpectedly, the next request spawns a fresh process.
+- Stderr is drained continuously to avoid blocking.
+
+Spawn arguments:
+
+```
+pi --mode rpc --no-session --no-tools --no-extensions --no-skills --no-prompt-templates
+```
+
+On Windows, `Process.start(..., runInShell: true)` is used so `pi.cmd` resolves.
+
+Abort:
+
+- Clankpad sends `{"type":"abort"}`.
+- Pi should stop generation and emit `agent_end`.
+
+### 4.3 Commands and events used
+
+Commands sent (in this order on submit):
+
+1. `set_model` (only when user picked a model)
+2. `set_thinking_level` (always sent)
+3. `new_session`
+4. `prompt`
+
+Clankpad consumes these events:
+
+- `message_update` with `assistantMessageEvent.type == "text_delta"` → treated as streamed text chunk
+- `agent_end` → clean completion
+- `auto_retry_end` with `success: false` → treated as failure
+
+Errors:
+
+- If Pi cannot be spawned, Clankpad shows:
+
+  `'<piExecutable>' not found — install it with npm install -g @mariozechner/pi-coding-agent and ensure it's on PATH.`
+
+- Other unrecoverable failures show:
+
+  `Pi process exited unexpectedly — try again.`
+
+### 4.4 Prompt formats (edit vs insert)
+
+Edit mode message:
+
+```
+Document context:
+<full document>
+
+Edit target:
+<selected text>
+
+Instruction: <user instruction>
+
+IMPORTANT: Reply with ONLY the transformed text. No explanations, no preamble.
+```
+
+Insert mode message:
+
+- The full document is sent with a `[CURSOR]` marker inserted at the cursor offset.
+
+```
+Document:
+<before>[CURSOR]<after>
+
+Instruction: <user instruction>
+
+IMPORTANT: Reply with ONLY the text to insert at [CURSOR]. Do not include surrounding blank lines. No explanations, no preamble.
+```
+
+### 4.5 Model list + enabledModels filtering
+
+When the AI prompt popup opens, Clankpad pre-warms Pi and fetches:
+
+- `get_available_models`
+- `get_state` (best-effort)
+- the user’s enabled model patterns from `~/.pi/agent/settings.json` (`enabledModels` key)
+
+Filtering:
+
+- Models are filtered by glob-like patterns from `enabledModels`.
+- If patterns are missing, empty, malformed, or filter everything out, the full model list is shown.
+
+UI:
+
+- The popup footer shows:
+  - a model dropdown
+  - a thinking level dropdown (`off/low/medium/high`) only when the effective model has `reasoning: true`
+
+---
+
+## 5. Acceptance scenarios (behavioral tests)
+
+These are practical “black box” scenarios to validate a compatible implementation.
+
+### Tabs
+
+1. Launch app → exactly one tab exists, titled `Untitled 1`.
+2. Press `Ctrl+N` twice → active tab is `Untitled 3` and the counter never reuses numbers.
+3. Close the last tab → a new untitled tab appears automatically.
+4. Edit a tab → a `●` appears in that tab’s title.
+5. Close a dirty tab → dialog shows Save / Don’t Save / Cancel.
+6. In dirty-close dialog, choose Cancel → tab stays open.
+7. In dirty-close dialog, choose Don’t Save → tab closes.
+
+### File open/save
+
+8. `Ctrl+O` and open a file; then `Ctrl+O` open the same file again → switches to existing tab, no duplicates.
+9. If active tab is empty/untitled, opening a file reuses that tab; otherwise it opens in a new tab.
+10. Save a new untitled tab → Save As dialog appears with suggested name `Untitled N.txt`.
+11. Save a file-backed dirty tab (`Ctrl+S`) → writes to disk and clears dirty state.
+12. Save a clean file-backed tab (`Ctrl+S`) → no visible changes (no-op).
+
+### Session persistence
+
+13. Type text into an untitled tab, close the app, reopen → text is restored.
+14. Open two files, edit one without saving, close app, reopen → both tabs are restored and the edited one keeps its unsaved content.
+15. Restore a clean file-backed tab whose file was deleted → tab is skipped and a startup notice is shown.
+16. Restore a dirty file-backed tab whose file was deleted → tab is restored from session and a warning notice is shown.
+
+### Find
+
+17. `Ctrl+F`, type query → highlights all matches; counter shows `N of M`.
+18. Press Enter repeatedly → selection wraps from last match to first.
+19. Press Escape → find bar closes and focus returns to editor.
+
+### AI (Pi required)
+
+20. Select text, press `Ctrl+K`, enter instruction, submit → editor locks, diff view opens, streaming updates “After” text.
+21. Accept diff → text changes and focus returns to editor.
+22. Reject diff → text stays unchanged and focus returns to editor.
+23. While AI is loading (before diff opens), press Escape → request cancels and editor unlocks.
+24. If `pi` is not installed → Ctrl+K submit shows error banner about installing Pi.
+
+---
+
+## Appendix A — Reference UI structure
 ```
 ┌─────────────────────────────────────────────────────┐
 │  [Untitled 1 ●] [×]  [notes.txt] [×]  [+]    ←scroll│  ← Tab bar (scrollable)
@@ -277,8 +604,7 @@ Pi must be installed and configured on the user's machine (`npm install -g @mari
 
 ---
 
-## 4. Data Model
-
+## Appendix B — Data model (Flutter)
 ### EditorTab
 
 ```dart
@@ -368,8 +694,7 @@ controller.addListener(() {
 
 ---
 
-## 5. Architecture
-
+## Appendix C — Architecture notes (Flutter)
 ### State Management
 
 `ChangeNotifier` + `ListenableBuilder`, both built into Flutter. No external package needed.
@@ -414,6 +739,10 @@ Shortcuts(
 Flutter resolves shortcuts from the **focused widget upward**, so the local layer wins over the root layer while the overlay is focused. When the overlay is dismissed, the bindings disappear automatically — no manual enable/disable flags needed.
 
 **Important:** do not use `autofocus: true` on the diff overlay's `Focus` widget. Flutter's `autofocus` only acquires focus when _no other node in the same scope is currently focused_. Because the editor's `_editorFocusNode` is always focused when the diff appears, `autofocus` silently does nothing. Focus must be driven explicitly (see §5 Focus Management).
+
+---
+
+## Appendix D — Focus & input correctness deep dive (Flutter)
 
 ### Focus Management
 
@@ -507,8 +836,7 @@ Offset `0` is always valid (start of text) and causes `EditableText` to render t
 
 ---
 
-## 6. Project File Structure
-
+## Appendix E — Project file structure
 ```
 lib/
   main.dart                    # Entry point, app bootstrap, session restore + lifecycle wiring
@@ -531,8 +859,7 @@ lib/
 
 ---
 
-## 7. Development Phases
-
+## Appendix F — Development phase log (historical)
 ### Phase 1 — Core (MVP)
 
 **End state:** a working multi-tab editor. Tabs, typing, dirty indicator, keyboard shortcuts all functional. Work is lost on close — that's expected. Every item here is independently testable.
@@ -1336,21 +1663,7 @@ Cycle order: `off → low → medium → high → off → …`
 
 ---
 
-### Phase 4 — Polish
-
-**End state:** the app feels complete and native. Visual refinements and quality-of-life improvements.
-
-- [ ] Window title reflects the active file
-- [ ] No-wrap + horizontal scroll mode with `Alt+Z` toggle (evaluate dedicated editor package e.g. `re_editor`)
-- [ ] Native app menu (File menu on Windows/macOS)
-- [ ] Font size adjustment
-- [ ] Light / dark theme
-- [ ] True inline `Ctrl+K` popup positioning near the selection (via `RenderEditable`)
-
----
-
-## 8. Dependencies
-
+## Appendix G — Dependencies
 Only one external package is used. Everything else relies on the Flutter/Dart standard library.
 
 | Package         | Purpose                       | Why not stdlib?                                                           |

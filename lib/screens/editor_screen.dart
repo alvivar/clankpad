@@ -150,8 +150,7 @@ class _EditorScreenState extends State<EditorScreen> {
     if (!selection.isValid || text.isEmpty) return;
 
     final lines = text.split('\n');
-    final firstLine =
-        text.substring(0, selection.start).split('\n').length - 1;
+    final firstLine = text.substring(0, selection.start).split('\n').length - 1;
     final lastLine = text.substring(0, selection.end).split('\n').length - 1;
 
     if (direction == -1 && firstLine == 0) return;
@@ -715,11 +714,7 @@ class _EditorScreenState extends State<EditorScreen> {
       // Adding \n on each side → \n\n = blank-line separator on both sides.
       final trimmed = result.trim();
       newText =
-          docText.substring(0, sel.start) +
-          '\n' +
-          trimmed +
-          '\n' +
-          docText.substring(sel.start);
+          '${docText.substring(0, sel.start)}\n$trimmed\n${docText.substring(sel.start)}';
       newCursorPos = sel.start + 1 + trimmed.length;
     } else {
       newText = docText.replaceRange(sel.start, sel.end, result);

@@ -16,8 +16,7 @@ import 'package:flutter/material.dart';
 /// Both layers are sorted and rendered together in a single pass, so they can
 /// coexist without conflict (they are mutually exclusive in normal usage).
 class HighlightingController extends TextEditingController {
-  HighlightingController.fromValue(TextEditingValue value)
-      : super.fromValue(value);
+  HighlightingController.fromValue(super.value) : super.fromValue();
 
   // ── Search-match layer ───────────────────────────────────────────────────────
 
@@ -92,7 +91,7 @@ class HighlightingController extends TextEditingController {
 
     if (hasMatches) {
       final otherColor = colorScheme.primaryContainer;
-      final currentColor = colorScheme.primary.withOpacity(0.35);
+      final currentColor = colorScheme.primary.withValues(alpha: 0.35);
       for (var i = 0; i < _matchOffsets.length; i++) {
         final s = _matchOffsets[i];
         if (s >= text.length) break;
@@ -165,7 +164,9 @@ class EditorTab {
          ),
        ),
        scrollController = ScrollController(),
-       isDirtyNotifier = ValueNotifier<bool>(false);
+       // Initialise dirty state immediately so restored tabs and newly-loaded
+       // content show the correct ● indicator before the user types.
+       isDirtyNotifier = ValueNotifier<bool>(initialContent != savedContent);
 
   bool get isDirty => isDirtyNotifier.value;
 
