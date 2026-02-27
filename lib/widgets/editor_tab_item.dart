@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart' show kMiddleMouseButton;
 import 'package:flutter/material.dart';
 
 import '../models/editor_tab.dart';
@@ -33,62 +34,69 @@ class EditorTabItem extends StatelessWidget {
             ? colorScheme.onSurface
             : colorScheme.onSurfaceVariant;
 
-        return GestureDetector(
-          onTap: onTap,
-          child: Container(
-            height: 36,
-            padding: const EdgeInsets.only(left: 12, right: 4),
-            decoration: BoxDecoration(
-              color: bgColor,
-              border: Border(
-                bottom: BorderSide(
-                  color: isActive ? colorScheme.primary : Colors.transparent,
-                  width: 2,
+        return Listener(
+          onPointerDown: (event) {
+            if ((event.buttons & kMiddleMouseButton) != 0) {
+              onClose();
+            }
+          },
+          child: GestureDetector(
+            onTap: onTap,
+            child: Container(
+              height: 36,
+              padding: const EdgeInsets.only(left: 12, right: 4),
+              decoration: BoxDecoration(
+                color: bgColor,
+                border: Border(
+                  bottom: BorderSide(
+                    color: isActive ? colorScheme.primary : Colors.transparent,
+                    width: 2,
+                  ),
+                  right: BorderSide(color: colorScheme.outlineVariant, width: 1),
                 ),
-                right: BorderSide(color: colorScheme.outlineVariant, width: 1),
               ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Dirty indicator dot
-                if (isDirty)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 5),
-                    child: Text(
-                      '●',
-                      style: TextStyle(
-                        fontSize: 9,
-                        color: colorScheme.primary,
-                        height: 1,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Dirty indicator dot
+                  if (isDirty)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 5),
+                      child: Text(
+                        '●',
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: colorScheme.primary,
+                          height: 1,
+                        ),
+                      ),
+                    ),
+
+                  // Tab title
+                  Text(tab.title, style: TextStyle(fontSize: 13, color: fgColor)),
+
+                  const SizedBox(width: 6),
+
+                  // Close button — ExcludeFocus prevents the IconButton from
+                  // stealing focus away from the editor on click.
+                  ExcludeFocus(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        iconSize: 13,
+                        icon: Icon(
+                          Icons.close,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                        tooltip: 'Close tab',
+                        onPressed: onClose,
                       ),
                     ),
                   ),
-
-                // Tab title
-                Text(tab.title, style: TextStyle(fontSize: 13, color: fgColor)),
-
-                const SizedBox(width: 6),
-
-                // Close button — ExcludeFocus prevents the IconButton from
-                // stealing focus away from the editor on click.
-                ExcludeFocus(
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: IconButton(
-                      padding: EdgeInsets.zero,
-                      iconSize: 13,
-                      icon: Icon(
-                        Icons.close,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                      tooltip: 'Close tab',
-                      onPressed: onClose,
-                    ),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );

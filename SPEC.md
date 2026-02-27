@@ -86,7 +86,7 @@ Tabs are the core unit of editing.
 |---|---|---|
 | New tab | `Ctrl+N` or `+` button | Adds a new untitled tab and activates it |
 | Switch tab | Click a tab | Activates that tab |
-| Close tab | `Ctrl+W` (active tab) or click `×` on a tab | Closes that tab; prompts if dirty |
+| Close tab | `Ctrl+W` (active tab), click `×`, or middle-click a tab | Closes that tab; prompts if dirty |
 
 **Title rules**
 
@@ -193,7 +193,7 @@ Clankpad uses native file dialogs via `file_selector`.
 - Opens a system file picker.
 - If the selected file is already open in any tab (path-normalized comparison), Clankpad switches to that existing tab instead of opening a duplicate.
 - Otherwise, Clankpad reads the file from disk:
-  - If the active tab is untitled and its current text is empty, the file is loaded into the active tab (the tab becomes file-backed).
+  - If the active tab is untitled, its current text is empty, and it is clean (not dirty), the file is loaded into the active tab (the tab becomes file-backed).
   - Otherwise, the file is opened in a new tab.
 
 If reading fails, a modal error dialog is shown (`Could not open file`).
@@ -554,36 +554,37 @@ These are practical “black box” scenarios to validate a compatible implement
 5. Close a dirty tab → dialog shows Save / Don’t Save / Cancel.
 6. In dirty-close dialog, choose Cancel → tab stays open.
 7. In dirty-close dialog, choose Don’t Save → tab closes.
+8. Middle-click a tab → that tab closes (dirty prompt behavior is unchanged).
 
 ### File open/save
 
-8. `Ctrl+O` and open a file; then `Ctrl+O` open the same file again → switches to existing tab, no duplicates.
-9. If active tab is empty/untitled, opening a file reuses that tab; otherwise it opens in a new tab.
-10. Save a new untitled tab → Save As dialog appears with suggested name `Untitled N.txt`.
-11. Save a file-backed dirty tab (`Ctrl+S`) → writes to disk and clears dirty state.
-12. Save a clean file-backed tab (`Ctrl+S`) → no visible changes (no-op).
+9. `Ctrl+O` and open a file; then `Ctrl+O` open the same file again → switches to existing tab, no duplicates.
+10. If active tab is empty/untitled and clean, opening a file reuses that tab; otherwise it opens in a new tab.
+11. Save a new untitled tab → Save As dialog appears with suggested name `Untitled N.txt`.
+12. Save a file-backed dirty tab (`Ctrl+S`) → writes to disk and clears dirty state.
+13. Save a clean file-backed tab (`Ctrl+S`) → no visible changes (no-op).
 
 ### Session persistence
 
-13. Type text into an untitled tab, close the app, reopen → text is restored.
-14. Open two files, edit one without saving, close app, reopen → both tabs are restored and the edited one keeps its unsaved content.
-15. Restore a clean file-backed tab whose file was deleted → tab is skipped and a startup notice is shown.
-16. Restore a dirty file-backed tab whose file was deleted → tab is restored from session and a warning notice is shown.
+14. Type text into an untitled tab, close the app, reopen → text is restored.
+15. Open two files, edit one without saving, close app, reopen → both tabs are restored and the edited one keeps its unsaved content.
+16. Restore a clean file-backed tab whose file was deleted → tab is skipped and a startup notice is shown.
+17. Restore a dirty file-backed tab whose file was deleted → tab is restored from session and a warning notice is shown.
 
 ### Find
 
-17. `Ctrl+F`, type query → highlights all matches; counter shows `N of M`.
-18. Press Enter repeatedly → selection wraps from last match to first.
-19. Press Escape → find bar closes and focus returns to editor.
+18. `Ctrl+F`, type query → highlights all matches; counter shows `N of M`.
+19. Press Enter repeatedly → selection wraps from last match to first.
+20. Press Escape → find bar closes and focus returns to editor.
 
 ### AI (Pi required)
 
-20. Select text, press `Ctrl+K`, enter instruction, submit → editor locks, diff view opens, streaming updates “After” text.
-21. Accept diff → text changes and focus returns to editor.
-22. Reject diff → text stays unchanged and focus returns to editor.
-23. While AI is loading (before diff opens), press Escape → request cancels and editor unlocks.
-24. If `pi` is not installed → Ctrl+K submit shows error banner about installing Pi.
-25. On launch, window opens centered at about 80% width × 90% height of usable screen area (excluding taskbar/menu bar/dock).
+21. Select text, press `Ctrl+K`, enter instruction, submit → editor locks, diff view opens, streaming updates “After” text.
+22. Accept diff → text changes and focus returns to editor.
+23. Reject diff → text stays unchanged and focus returns to editor.
+24. While AI is loading (before diff opens), press Escape → request cancels and editor unlocks.
+25. If `pi` is not installed → Ctrl+K submit shows error banner about installing Pi.
+26. On launch, window opens centered at about 80% width × 90% height of usable screen area (excluding taskbar/menu bar/dock).
 
 ---
 
