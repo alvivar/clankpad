@@ -82,11 +82,11 @@ Tabs are the core unit of editing.
 
 **Actions**
 
-| Action | How | Result |
-|---|---|---|
-| New tab | `Ctrl+N` or `+` button | Adds a new untitled tab and activates it |
-| Switch tab | Click a tab | Activates that tab |
-| Close tab | `Ctrl+W` (active tab), click `×`, or middle-click a tab | Closes that tab; prompts if dirty |
+| Action     | How                                                     | Result                                   |
+| ---------- | ------------------------------------------------------- | ---------------------------------------- |
+| New tab    | `Ctrl+N` or `+` button                                  | Adds a new untitled tab and activates it |
+| Switch tab | Click a tab                                             | Activates that tab                       |
+| Close tab  | `Ctrl+W` (active tab), click `×`, or middle-click a tab | Closes that tab; prompts if dirty        |
 
 **Title rules**
 
@@ -141,46 +141,46 @@ This is the canonical shortcut list for the current implementation.
 
 #### App-level shortcuts (active when the editor screen is active)
 
-| Shortcut | Action |
-|---|---|
-| `Ctrl+N` | New tab |
-| `Ctrl+W` | Close active tab (with dirty prompt) |
-| `Ctrl+O` | Open file |
-| `Ctrl+S` | Save (no-op if the file is already clean) |
-| `Ctrl+Shift+S` | Save As |
-| `Ctrl+F` | Open/find focus the find bar |
-| `Ctrl+K` | Open the AI prompt popup |
-| `Alt+↑` | Move line/block up |
-| `Alt+↓` | Move line/block down |
-| `Escape` | Cancel in-flight AI request **only while loading and before diff opens** |
+| Shortcut       | Action                                                                   |
+| -------------- | ------------------------------------------------------------------------ |
+| `Ctrl+N`       | New tab                                                                  |
+| `Ctrl+W`       | Close active tab (with dirty prompt)                                     |
+| `Ctrl+O`       | Open file                                                                |
+| `Ctrl+S`       | Save (no-op if the file is already clean)                                |
+| `Ctrl+Shift+S` | Save As                                                                  |
+| `Ctrl+F`       | Open/find focus the find bar                                             |
+| `Ctrl+K`       | Open the AI prompt popup                                                 |
+| `Alt+↑`        | Move line/block up                                                       |
+| `Alt+↓`        | Move line/block down                                                     |
+| `Escape`       | Cancel in-flight AI request **only while loading and before diff opens** |
 
 #### Find bar shortcuts (while the find field has focus)
 
-| Shortcut | Action |
-|---|---|
-| `Enter` or `F3` | Next match |
+| Shortcut                    | Action         |
+| --------------------------- | -------------- |
+| `Enter` or `F3`             | Next match     |
 | `Shift+Enter` or `Shift+F3` | Previous match |
-| `Escape` | Close find bar |
+| `Escape`                    | Close find bar |
 
 #### AI prompt popup shortcuts (while the popup text field has focus)
 
-| Shortcut | Action |
-|---|---|
-| `Enter` | Submit prompt |
-| `Shift+Enter` | Insert newline in prompt |
-| `Escape` | Dismiss popup |
-| `↑` / `↓` | Prompt history navigation (only when caret is on first/last line) |
-| `Ctrl+P` | Cycle model forward (if model list is loaded) |
-| `Shift+Tab` | Cycle thinking level forward (only if effective model supports reasoning) |
+| Shortcut      | Action                                                                    |
+| ------------- | ------------------------------------------------------------------------- |
+| `Enter`       | Submit prompt                                                             |
+| `Shift+Enter` | Insert newline in prompt                                                  |
+| `Escape`      | Dismiss popup                                                             |
+| `↑` / `↓`     | Prompt history navigation (only when caret is on first/last line)         |
+| `Ctrl+P`      | Cycle model forward (if model list is loaded)                             |
+| `Shift+Tab`   | Cycle thinking level forward (only if effective model supports reasoning) |
 
 While the AI prompt popup is open, app-level shortcuts like `Ctrl+N`, `Ctrl+W`, `Ctrl+O`, `Ctrl+S`, `Ctrl+K`, `Ctrl+F` are blocked from reaching the root shortcut layer.
 
 #### AI diff view shortcuts
 
-| Shortcut | Action |
-|---|---|
+| Shortcut              | Action               |
+| --------------------- | -------------------- |
 | `Tab` or `Ctrl+Enter` | Accept proposed edit |
-| `Escape` | Reject proposed edit |
+| `Escape`              | Reject proposed edit |
 
 While the diff view is focused, app-level shortcuts are blocked.
 
@@ -589,6 +589,7 @@ These are practical “black box” scenarios to validate a compatible implement
 ---
 
 ## Appendix A — Reference UI structure
+
 ```
 ┌─────────────────────────────────────────────────────┐
 │  [Untitled 1 ●] [×]  [notes.txt] [×]  [+]    ←scroll│  ← Tab bar (scrollable)
@@ -610,6 +611,7 @@ These are practical “black box” scenarios to validate a compatible implement
 ---
 
 ## Appendix B — Data model (Flutter)
+
 ### EditorTab
 
 ```dart
@@ -665,30 +667,30 @@ controller.addListener(() {
 
 ```json
 {
-    "activeTabIndex": 2,
-    "nextTabId": 6,
-    "untitledCounter": 4,
-    "tabs": [
-        {
-            "id": 3,
-            "title": "Untitled 3",
-            "filePath": null,
-            "content": "some unsaved text...",
-            "savedContent": ""
-        },
-        {
-            "id": 4,
-            "title": "notes.txt",
-            "filePath": "C:/Users/user/Documents/notes.txt"
-        },
-        {
-            "id": 5,
-            "title": "draft.txt",
-            "filePath": "C:/Users/user/Documents/draft.txt",
-            "content": "edited but not yet saved...",
-            "savedContent": "original saved text"
-        }
-    ]
+  "activeTabIndex": 2,
+  "nextTabId": 6,
+  "untitledCounter": 4,
+  "tabs": [
+    {
+      "id": 3,
+      "title": "Untitled 3",
+      "filePath": null,
+      "content": "some unsaved text...",
+      "savedContent": ""
+    },
+    {
+      "id": 4,
+      "title": "notes.txt",
+      "filePath": "C:/Users/user/Documents/notes.txt"
+    },
+    {
+      "id": 5,
+      "title": "draft.txt",
+      "filePath": "C:/Users/user/Documents/draft.txt",
+      "content": "edited but not yet saved...",
+      "savedContent": "original saved text"
+    }
+  ]
 }
 ```
 
@@ -700,6 +702,7 @@ controller.addListener(() {
 ---
 
 ## Appendix C — Architecture notes (Flutter)
+
 ### State Management
 
 `ChangeNotifier` + `ListenableBuilder`, both built into Flutter. No external package needed.
@@ -842,6 +845,7 @@ Offset `0` is always valid (start of text) and causes `EditableText` to render t
 ---
 
 ## Appendix E — Project file structure
+
 ```
 lib/
   main.dart                    # Entry point, app bootstrap, session restore + lifecycle wiring
@@ -865,6 +869,7 @@ lib/
 ---
 
 ## Appendix F — Development phase log (historical)
+
 ### Phase 1 — Core (MVP)
 
 **End state:** a working multi-tab editor. Tabs, typing, dirty indicator, keyboard shortcuts all functional. Work is lost on close — that's expected. Every item here is independently testable.
@@ -1669,6 +1674,7 @@ Cycle order: `off → low → medium → high → off → …`
 ---
 
 ## Appendix G — Dependencies
+
 Only one external package is used. Everything else relies on the Flutter/Dart standard library.
 
 | Package         | Purpose                       | Why not stdlib?                                                           |

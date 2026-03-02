@@ -26,8 +26,8 @@ If you want to keep things simple and reliable, I’d keep the current structure
 - Snapshot is taken from the active tab: `lib/screens/editor_screen.dart:229-238`
 - Accept applies to _current_ active tab: `lib/screens/editor_screen.dart:428-446`
 - Tab switching/new/close is still available from tab bar and root actions:
-    - `lib/screens/editor_screen.dart:580-593`
-    - `lib/screens/editor_screen.dart:611-616`
+  - `lib/screens/editor_screen.dart:580-593`
+  - `lib/screens/editor_screen.dart:611-616`
 
 **Why this matters**
 If the user switches tabs (mouse) or triggers tab/file actions while AI is running, the snapshot and the apply target can diverge. That risks writing AI output into a different tab than the one that was snapshotted.
