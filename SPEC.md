@@ -135,6 +135,16 @@ If a tab is dirty, closing it shows a blocking dialog with three options:
 - It’s a no-op at the first/last line boundary.
 - It’s blocked while the editor is read-only.
 
+**Indent / outdent**
+
+- `Tab` indents by 4 spaces.
+- With a selection, `Tab` indents every selected line by 4 spaces.
+- With no selection, `Tab` inserts 4 spaces at the caret.
+- `Shift+Tab` outdents by up to 4 spaces.
+- With a selection, `Shift+Tab` removes up to 4 leading spaces from every selected line.
+- With no selection, `Shift+Tab` removes up to 4 spaces immediately before the caret.
+- Indent/outdent is blocked while the editor is read-only.
+
 ### 2.4 Keyboard shortcuts (canonical map)
 
 This is the canonical shortcut list for the current implementation.
@@ -153,6 +163,13 @@ This is the canonical shortcut list for the current implementation.
 | `Alt+↑`        | Move line/block up                                                       |
 | `Alt+↓`        | Move line/block down                                                     |
 | `Escape`       | Cancel in-flight AI request **only while loading and before diff opens** |
+
+#### Editor text shortcuts (while editor has focus)
+
+| Shortcut    | Action                                                                  |
+| ----------- | ----------------------------------------------------------------------- |
+| `Tab`       | Indent selection by 4 spaces, or insert 4 spaces at caret if no selection |
+| `Shift+Tab` | Outdent selection by up to 4 spaces, or remove up to 4 spaces before caret |
 
 #### Find bar shortcuts (while the find field has focus)
 
