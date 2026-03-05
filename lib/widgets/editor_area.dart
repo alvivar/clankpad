@@ -4,7 +4,8 @@ import 'package:flutter/services.dart';
 import '../models/editor_tab.dart';
 
 class EditorArea extends StatelessWidget {
-  static const _indent = '    '; // 4 spaces
+  static const _tabSize = 4;
+  static const _indent = '    ';
 
   final EditorTab tab;
   final bool readOnly;
@@ -28,30 +29,28 @@ class EditorArea extends StatelessWidget {
       return KeyEventResult.ignored;
     }
 
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isControlPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isMetaPressed) {
+      return KeyEventResult.ignored;
+    }
+
     final controller = tab.controller;
     final selection = controller.selection;
     if (!selection.isValid) return KeyEventResult.handled;
 
-    if (HardwareKeyboard.instance.isShiftPressed) {
+    if (keyboard.isShiftPressed) {
       _outdent(controller, selection);
     } else {
-      _indentSelectionOrInsert(controller, selection);
+      _applyIndent(controller, selection);
     }
     return KeyEventResult.handled;
   }
 
-  void _indentSelectionOrInsert(
-    TextEditingController controller,
-    TextSelection selection,
-  ) {
+  void _applyIndent(TextEditingController controller, TextSelection selection) {
     if (selection.isCollapsed) {
-      final caret = selection.extentOffset;
-      if (caret < 0) return;
-      final text = controller.text;
-      controller.value = TextEditingValue(
-        text: '${text.substring(0, caret)}$_indent${text.substring(caret)}',
-        selection: TextSelection.collapsed(offset: caret + _indent.length),
-      );
+      _insertToNextTabStop(controller, selection.extentOffset);
       return;
     }
 
@@ -60,26 +59,49 @@ class EditorArea extends StatelessWidget {
 
   void _outdent(TextEditingController controller, TextSelection selection) {
     if (selection.isCollapsed) {
-      final caret = selection.extentOffset;
-      if (caret <= 0) return;
-      final text = controller.text;
-
-      var remove = 0;
-      while (remove < _indent.length &&
-          caret - remove - 1 >= 0 &&
-          text.codeUnitAt(caret - remove - 1) == 0x20) {
-        remove++;
-      }
-      if (remove == 0) return;
-
-      controller.value = TextEditingValue(
-        text: text.replaceRange(caret - remove, caret, ''),
-        selection: TextSelection.collapsed(offset: caret - remove),
-      );
+      _outdentCurrentLine(controller, selection.extentOffset);
       return;
     }
 
     _transformSelectedLines(controller, selection, outdent: true);
+  }
+
+  void _insertToNextTabStop(TextEditingController controller, int caretOffset) {
+    final text = controller.text;
+    var caret = caretOffset.clamp(0, text.length);
+
+    final lineStart = _lineStartAt(text, caret);
+    final column = _visualColumn(text, lineStart, caret);
+    final insertCount = _spacesToNextTabStop(column);
+    final spaces = _spaces(insertCount);
+
+    controller.value = TextEditingValue(
+      text: '${text.substring(0, caret)}$spaces${text.substring(caret)}',
+      selection: TextSelection.collapsed(offset: caret + insertCount),
+    );
+  }
+
+  void _outdentCurrentLine(TextEditingController controller, int caretOffset) {
+    final text = controller.text;
+    if (text.isEmpty) return;
+
+    var caret = caretOffset.clamp(0, text.length);
+    final lineStart = _lineStartAt(text, caret);
+    final leadingSpaces = _leadingSpacesInTextLine(text, lineStart);
+    if (leadingSpaces == 0) return;
+
+    final remove = _spacesToPreviousTabStop(leadingSpaces).clamp(
+      0,
+      leadingSpaces,
+    );
+
+    final newText = text.replaceRange(lineStart, lineStart + remove, '');
+    final newCaret = caret <= lineStart + remove ? lineStart : caret - remove;
+
+    controller.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newCaret),
+    );
   }
 
   void _transformSelectedLines(
@@ -107,7 +129,7 @@ class EditorArea extends StatelessWidget {
       return hi < 0 ? 0 : hi;
     }
 
-    final startOffset = selection.start.clamp(0, text.length);
+    final int startOffset = selection.start.clamp(0, text.length);
     var endOffset = selection.end.clamp(0, text.length);
     if (endOffset > startOffset &&
         endOffset > 0 &&
@@ -125,18 +147,17 @@ class EditorArea extends StatelessWidget {
       final pos = starts[i];
       if (outdent) {
         final line = lines[i];
-        var remove = 0;
-        while (remove < _indent.length &&
-            remove < line.length &&
-            line.codeUnitAt(remove) == 0x20) {
-          remove++;
-        }
+        final leadingSpaces = _leadingSpacesInLine(line);
+        final remove = _spacesToPreviousTabStop(leadingSpaces).clamp(
+          0,
+          leadingSpaces,
+        );
         if (remove == 0) continue;
         lines[i] = line.substring(remove);
         edits.add((pos, remove, 0));
       } else {
         lines[i] = '$_indent${lines[i]}';
-        edits.add((pos, 0, _indent.length));
+        edits.add((pos, 0, _tabSize));
       }
     }
 
@@ -172,6 +193,57 @@ class EditorArea extends StatelessWidget {
       selection: TextSelection(baseOffset: newBase, extentOffset: newExtent),
     );
   }
+
+  static int _lineStartAt(String text, int offset) {
+    if (offset <= 0) return 0;
+    return text.lastIndexOf('\n', offset - 1) + 1;
+  }
+
+  static int _visualColumn(String text, int lineStart, int offset) {
+    var column = 0;
+    for (var i = lineStart; i < offset; i++) {
+      if (text.codeUnitAt(i) == 0x09) {
+        column += _spacesToNextTabStop(column);
+      } else {
+        column++;
+      }
+    }
+    return column;
+  }
+
+  static int _leadingSpacesInTextLine(String text, int lineStart) {
+    var count = 0;
+    for (var i = lineStart; i < text.length; i++) {
+      final code = text.codeUnitAt(i);
+      if (code == 0x20) {
+        count++;
+        continue;
+      }
+      break;
+    }
+    return count;
+  }
+
+  static int _leadingSpacesInLine(String line) {
+    var count = 0;
+    while (count < line.length && line.codeUnitAt(count) == 0x20) {
+      count++;
+    }
+    return count;
+  }
+
+  static int _spacesToNextTabStop(int column) {
+    final rem = column % _tabSize;
+    return rem == 0 ? _tabSize : _tabSize - rem;
+  }
+
+  static int _spacesToPreviousTabStop(int column) {
+    if (column <= 0) return 0;
+    final rem = column % _tabSize;
+    return rem == 0 ? _tabSize : rem;
+  }
+
+  static String _spaces(int count) => List.filled(count, ' ').join();
 
   static List<int> _lineStarts(String text) {
     final starts = <int>[0];

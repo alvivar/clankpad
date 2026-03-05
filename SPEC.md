@@ -137,12 +137,11 @@ If a tab is dirty, closing it shows a blocking dialog with three options:
 
 **Indent / outdent**
 
-- `Tab` indents by 4 spaces.
+- `Tab` / `Shift+Tab` are editor-local (handled in the editor widget, not root shortcuts).
 - With a selection, `Tab` indents every selected line by 4 spaces.
-- With no selection, `Tab` inserts 4 spaces at the caret.
-- `Shift+Tab` outdents by up to 4 spaces.
-- With a selection, `Shift+Tab` removes up to 4 leading spaces from every selected line.
-- With no selection, `Shift+Tab` removes up to 4 spaces immediately before the caret.
+- With no selection, `Tab` inserts spaces to the next tab stop (tab size = 4), so insertion width is 1–4 spaces depending on caret column.
+- With a selection, `Shift+Tab` outdents every selected line to the previous tab stop (removes up to 4 leading spaces per line).
+- With no selection, `Shift+Tab` outdents the current line's leading indentation to the previous tab stop (not just characters before the caret).
 - Indent/outdent is blocked while the editor is read-only.
 
 ### 2.4 Keyboard shortcuts (canonical map)
@@ -166,10 +165,10 @@ This is the canonical shortcut list for the current implementation.
 
 #### Editor text shortcuts (while editor has focus)
 
-| Shortcut    | Action                                                                  |
-| ----------- | ----------------------------------------------------------------------- |
-| `Tab`       | Indent selection by 4 spaces, or insert 4 spaces at caret if no selection |
-| `Shift+Tab` | Outdent selection by up to 4 spaces, or remove up to 4 spaces before caret |
+| Shortcut    | Action                                                                                                               |
+| ----------- | -------------------------------------------------------------------------------------------------------------------- |
+| `Tab`       | Indent selection by 4 spaces, or insert spaces to next tab stop (tab size 4) when no selection                    |
+| `Shift+Tab` | Outdent selection to previous tab stop, or outdent current line's leading indentation when no selection            |
 
 #### Find bar shortcuts (while the find field has focus)
 
