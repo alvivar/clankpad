@@ -878,8 +878,7 @@ class _EditorScreenState extends State<EditorScreen> {
         SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
             MoveLineDownIntent(),
         // Escape cancels the in-flight AI request before the diff opens.
-        // When the diff IS open, AiDiffView's inner Shortcuts intercept Escape
-        // first (for Reject), so this binding is only reachable during loading.
+        // Once the diff is visible, this action is gated off by _diffVisible.
         SingleActivator(LogicalKeyboardKey.escape): CancelAiIntent(),
       },
       child: Actions(

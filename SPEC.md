@@ -177,10 +177,10 @@ While the AI prompt popup is open, app-level shortcuts like `Ctrl+N`, `Ctrl+W`, 
 
 #### AI diff view shortcuts
 
-| Shortcut              | Action               |
-| --------------------- | -------------------- |
-| `Tab` or `Ctrl+Enter` | Accept proposed edit |
-| `Escape`              | Reject proposed edit |
+| Shortcut         | Action               |
+| ---------------- | -------------------- |
+| `Ctrl+Enter`     | Accept proposed edit |
+| `Ctrl+Backspace` | Reject proposed edit |
 
 While the diff view is focused, app-level shortcuts are blocked.
 
@@ -728,14 +728,13 @@ This approach correctly intercepts shortcuts even when a `TextField` is focused,
 
 **Rule: never map keys that overlap with standard text-editing shortcuts.** The root layer only registers app-specific combos (`Ctrl+N`, `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+O`, `Ctrl+W`, `Ctrl+K`). Flutter's `EditableText` handles `Ctrl+C/V/X/Z/A` internally — as long as those keys are not registered in the root `Shortcuts` map, they pass through untouched.
 
-**Diff overlay — local `Shortcuts` layer inside the overlay widget.** When the diff view is open, `Tab` must accept the diff rather than traverse focus. The solution is a second `Shortcuts` widget scoped _inside_ `ai_diff_view.dart`, not at the root:
+**Diff overlay — local `Shortcuts` layer inside the overlay widget.** The diff view uses its own shortcut bindings (`Ctrl+Enter` accept, `Ctrl+Backspace` reject). The solution is a second `Shortcuts` widget scoped _inside_ `ai_diff_view.dart`, not at the root:
 
 ```dart
 Shortcuts(
   shortcuts: {
-    SingleActivator(LogicalKeyboardKey.tab):                       AcceptDiffIntent(),
     SingleActivator(LogicalKeyboardKey.enter, control: true):      AcceptDiffIntent(),
-    SingleActivator(LogicalKeyboardKey.escape):                    RejectDiffIntent(),
+    SingleActivator(LogicalKeyboardKey.backspace, control: true):  RejectDiffIntent(),
   },
   child: Actions(
     actions: { /* AcceptDiffIntent, RejectDiffIntent handlers */ },
@@ -901,7 +900,7 @@ lib/
 
 - [x] Session persistence: debounced write to `session.json` (500ms), atomic via `.tmp` rename, restore on launch, synchronous flush via `AppLifecycleListener.onExitRequested`
 - [x] Restore missing-file edge cases (dirty → restore content + notice; clean → skip + notification; clamp `activeTabIndex`; enforce min-1-tab after filtering)
-- [x] `Ctrl+K` diff view: old vs new, Accept (`Tab` / `Ctrl+Enter`) or Reject (`Escape`)
+- [x] `Ctrl+K` diff view: old vs new, Accept (`Ctrl+Enter`) or Reject (`Ctrl+Backspace`)
 
 ### Phase 3.5 — Focus & Input Correctness
 
@@ -1076,7 +1075,7 @@ The banner persists until the user clicks `×`. A new error replaces the previou
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Service field        | `_aiService` (type `AiService`) → `_piRpcService` (type `PiRpcService`).                                                                                                                                                                                                                       |
 | `_submitAiPrompt`    | `await for`s chunks from `streamEdit`; first chunk triggers `_diffVisible = true` + `_diffFocusNode.requestFocus()` (post-frame); subsequent chunks append to `_diffProposed` + `setState`. Wrapped in `try/catch/finally`: catch sets `_errorBanner`, finally sets `_editorReadOnly = false`. |
-| Cancel button        | Shown while `_editorReadOnly && !_diffVisible`. Calls `_piRpcService.abort()` + unlocks editor. Once the diff is visible this button is gone — the cancel path from that point is Reject (Escape or button), which also calls `abort()`.                                                       |
+| Cancel button        | Shown while `_editorReadOnly && !_diffVisible`. Calls `_piRpcService.abort()` + unlocks editor. Once the diff is visible this button is gone — the cancel path from that point is Reject (`Ctrl+Backspace` or button), which also calls `abort()`.                                             |
 | Escape-while-loading | `Focus.onKeyEvent` on `EditorScreen`: `Escape` when `_editorReadOnly && !_aiPromptVisible && !_diffVisible` → calls `abort()`.                                                                                                                                                                 |
 | `_rejectDiff`        | Calls `_piRpcService.abort()` before the existing `setState`. Stops Pi if the stream is still running when the user rejects; no-op if it has already finished.                                                                                                                                 |
 | Error banner         | New `String? _errorBanner` field. Set on error; cleared on dismiss or next `Ctrl+K`. Rendered as a thin coloured row below the tab bar with a `×` dismiss button.                                                                                                                              |

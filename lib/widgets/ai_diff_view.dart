@@ -7,8 +7,8 @@ import '../models/intents.dart';
 ///
 /// Displays the original [editTarget] alongside the [proposed] replacement so
 /// the user can review before committing. Keyboard shortcuts per spec:
-///   Accept → Tab  or  Ctrl+Enter
-///   Reject → Escape
+///   Accept → Ctrl+Enter
+///   Reject → Ctrl+Backspace
 ///
 /// A local [Shortcuts] layer intercepts those keys before they reach the root
 /// layer. App-level shortcuts (Ctrl+N, Ctrl+W, …) are also blocked while this
@@ -35,10 +35,10 @@ class AiDiffView extends StatelessWidget {
     return Shortcuts(
       shortcuts: const {
         // ── Diff actions ──────────────────────────────────────────────────
-        SingleActivator(LogicalKeyboardKey.tab): AcceptDiffIntent(),
         SingleActivator(LogicalKeyboardKey.enter, control: true):
             AcceptDiffIntent(),
-        SingleActivator(LogicalKeyboardKey.escape): RejectDiffIntent(),
+        SingleActivator(LogicalKeyboardKey.backspace, control: true):
+            RejectDiffIntent(),
 
         // ── Block app-level shortcuts (same list as AiPromptPopup) ────────
         SingleActivator(LogicalKeyboardKey.keyN, control: true):
@@ -198,12 +198,12 @@ class _DiffCard extends StatelessWidget {
               children: [
                 TextButton(
                   onPressed: onReject,
-                  child: const Text('Reject  (Esc)'),
+                  child: const Text('Reject  (Ctrl+Backspace)'),
                 ),
                 const SizedBox(width: 8),
                 FilledButton(
                   onPressed: onAccept,
-                  child: const Text('Accept  (Tab)'),
+                  child: const Text('Accept  (Ctrl+Enter)'),
                 ),
               ],
             ),
