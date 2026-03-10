@@ -124,11 +124,8 @@ class SessionService {
       'tabs': tabsJson,
       if (_state.lastProviderKey != null)
         'lastProviderKey': _state.lastProviderKey,
-      if (_state.lastModelProvider != null)
-        'lastModelProvider': _state.lastModelProvider,
-      if (_state.lastModelId != null) 'lastModelId': _state.lastModelId,
-      if (_state.lastThinkingLevel != null)
-        'lastThinkingLevel': _state.lastThinkingLevel,
+      if (_state.providerPrefs.isNotEmpty)
+        'providerPrefs': _state.providerPrefs,
     });
   }
 

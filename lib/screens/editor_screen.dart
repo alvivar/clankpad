@@ -92,6 +92,8 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // Per-provider model cache — fetched once per provider, reused on switch-back.
   final Map<String, List<Map<String, dynamic>>> _modelCache = {};
+  // Full fetch result (includes suggestions) — kept for switch-back seeding.
+  final Map<String, AiProviderModels> _fetchResultCache = {};
 
   List<Map<String, dynamic>> _availableModels = [];
   bool _modelsLoading = false;
@@ -537,7 +539,7 @@ class _EditorScreenState extends State<EditorScreen> {
     final cached = _modelCache[key];
     if (cached != null && _availableModels.isNotEmpty) return;
     if (cached != null) {
-      _applyCachedModels(key, cached, null);
+      _applyCachedModels(key, cached, _fetchResultCache[key]);
       return;
     }
 
@@ -549,6 +551,7 @@ class _EditorScreenState extends State<EditorScreen> {
         .then((result) {
           if (!mounted || _selectedProviderKey != key) return;
           _modelCache[key] = result.models;
+          _fetchResultCache[key] = result;
           _applyCachedModels(key, result.models, result);
         })
         .catchError((_) {
@@ -565,8 +568,8 @@ class _EditorScreenState extends State<EditorScreen> {
     List<Map<String, dynamic>> models,
     AiProviderModels? fetchResult,
   ) {
-    // Seed model + thinking level. Priority:
-    //   1. Persisted preference from last session (if model still exists)
+    // Seed model + thinking level from per-provider prefs. Priority:
+    //   1. Persisted preference for this provider (if model still exists)
     //   2. Provider's suggested model (e.g. Pi's live state)
     //   3. No selection — provider uses its configured default
     bool modelInList(String? provider, String? id) =>
@@ -574,11 +577,16 @@ class _EditorScreenState extends State<EditorScreen> {
         id != null &&
         models.any((m) => m['id'] == id && m['provider'] == provider);
 
+    final prefs = _state.providerPrefs[providerKey];
+    final prefProvider = prefs?['modelProvider'];
+    final prefModelId = prefs?['modelId'];
+    final prefThinking = prefs?['thinkingLevel'];
+
     String? seedProvider;
     String? seedModelId;
-    if (modelInList(_state.lastModelProvider, _state.lastModelId)) {
-      seedProvider = _state.lastModelProvider;
-      seedModelId = _state.lastModelId;
+    if (modelInList(prefProvider, prefModelId)) {
+      seedProvider = prefProvider;
+      seedModelId = prefModelId;
     } else if (fetchResult != null &&
         modelInList(
           fetchResult.suggestedProvider,
@@ -590,18 +598,23 @@ class _EditorScreenState extends State<EditorScreen> {
 
     // Thinking level: persisted preference, then provider suggestion.
     final suggestedLevel = fetchResult?.suggestedThinkingLevel ?? 'off';
-    final seedLevel = _state.lastThinkingLevel != null
-        ? _normaliseLevel(_state.lastThinkingLevel!)
+    final seedLevel = prefThinking != null
+        ? _normaliseLevel(prefThinking)
         : _normaliseLevel(suggestedLevel);
+
+    // If no seed was found, fall back to first model in the list so that
+    // _selectedProvider/_selectedModelId are always populated when models exist.
+    if (seedProvider == null && models.isNotEmpty) {
+      seedProvider = models.first['provider'] as String?;
+      seedModelId = models.first['id'] as String?;
+    }
 
     setState(() {
       _availableModels = models;
       _modelsLoading = false;
       _thinkingLevel = seedLevel;
-      if (seedProvider != null) {
-        _selectedProvider = seedProvider;
-        _selectedModelId = seedModelId;
-      }
+      _selectedProvider = seedProvider;
+      _selectedModelId = seedModelId;
     });
   }
 
@@ -685,9 +698,14 @@ class _EditorScreenState extends State<EditorScreen> {
     // with the same selection. Written to EditorState fields; the debounced
     // session save picks them up automatically.
     _state.lastProviderKey = _selectedProviderKey;
-    _state.lastModelProvider = _selectedProvider;
-    _state.lastModelId = _selectedModelId;
-    _state.lastThinkingLevel = _thinkingLevel;
+    final prefs = <String, String>{'thinkingLevel': _thinkingLevel};
+    if (_selectedProvider != null) {
+      prefs['modelProvider'] = _selectedProvider!;
+    }
+    if (_selectedModelId != null) {
+      prefs['modelId'] = _selectedModelId!;
+    }
+    _state.providerPrefs[_selectedProviderKey] = prefs;
 
     setState(() {
       _aiPromptVisible = false;
@@ -1110,8 +1128,8 @@ class _EditorScreenState extends State<EditorScreen> {
                           },
                           supportedThinkingLevels:
                               _selectedProviderKey == 'claude_code'
-                                  ? const ['low', 'medium', 'high']
-                                  : const ['off', 'low', 'medium', 'high'],
+                              ? const ['low', 'medium', 'high']
+                              : const ['off', 'low', 'medium', 'high'],
                         ),
                         onModelChanged: (provider, modelId) => setState(() {
                           _selectedProvider = provider;

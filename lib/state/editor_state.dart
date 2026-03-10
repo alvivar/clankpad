@@ -34,13 +34,14 @@ class EditorState extends ChangeNotifier {
 
   // ── Persisted AI preferences ────────────────────────────────────────────────
 
-  // Last-used model and thinking level. Persisted in session.json so the
-  // user's choice survives app restarts. Silently ignored on restore if the
-  // model is no longer available in Pi's config.
+  // Last-used provider key (e.g. 'pi', 'claude_code').
   String? lastProviderKey;
-  String? lastModelProvider;
-  String? lastModelId;
-  String? lastThinkingLevel;
+
+  // Per-provider model and thinking level preferences. Keyed by provider key.
+  // Each value is {'modelProvider': ..., 'modelId': ..., 'thinkingLevel': ...}.
+  // Persisted in session.json so each provider's choice survives app restarts
+  // and provider switching within a session.
+  Map<String, Map<String, String>> providerPrefs = {};
 
   // Notices collected during session restore (missing files, etc.).
   // Consumed once by EditorScreen via takeStartupNotices().
@@ -206,9 +207,30 @@ class EditorState extends ChangeNotifier {
     final storedActiveIndex = (json['activeTabIndex'] as int?) ?? 0;
 
     lastProviderKey = json['lastProviderKey'] as String?;
-    lastModelProvider = json['lastModelProvider'] as String?;
-    lastModelId = json['lastModelId'] as String?;
-    lastThinkingLevel = json['lastThinkingLevel'] as String?;
+
+    // Restore per-provider prefs. Supports both the new 'providerPrefs' map
+    // and the legacy flat fields (lastModelProvider, etc.) for migration.
+    final prefsJson = json['providerPrefs'] as Map<String, dynamic>?;
+    if (prefsJson != null) {
+      providerPrefs = prefsJson.map(
+        (k, v) => MapEntry(k, Map<String, String>.from(v as Map)),
+      );
+    } else {
+      // Migrate legacy flat fields into providerPrefs under the last provider.
+      final legacyKey = lastProviderKey ?? 'pi';
+      final legacyProvider = json['lastModelProvider'] as String?;
+      final legacyModelId = json['lastModelId'] as String?;
+      final legacyThinking = json['lastThinkingLevel'] as String?;
+      if (legacyProvider != null ||
+          legacyModelId != null ||
+          legacyThinking != null) {
+        final prefs = <String, String>{};
+        if (legacyProvider != null) prefs['modelProvider'] = legacyProvider;
+        if (legacyModelId != null) prefs['modelId'] = legacyModelId;
+        if (legacyThinking != null) prefs['thinkingLevel'] = legacyThinking;
+        providerPrefs[legacyKey] = prefs;
+      }
+    }
 
     // Dispose the initial tab created by the constructor.
     for (final tab in _tabs) {
