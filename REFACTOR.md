@@ -111,16 +111,17 @@ abstract class AiProvider {
 
 Three phases. Each leaves the app in a working, `flutter analyze`-clean state.
 
-### Phase 1 — Extract interface + refactor Pi into it
+### Phase 1 — Extract interface + refactor Pi into it ✅
 
 **Goal**: introduce the `AiProvider` abstraction without adding any new functionality. App works exactly as before.
 
-- [ ] Create `lib/services/ai_provider.dart` with the abstract class.
-- [ ] Move `_buildPromptMessage` from `PiRpcService` into `AiProvider` as a shared static/base method.
-- [ ] Rename `lib/services/pi_rpc_service.dart` → `lib/services/pi_provider.dart`; class `PiRpcService` → `PiProvider implements AiProvider`.
-- [ ] Adapt `PiProvider` to satisfy the interface (`fetchModels` wraps the existing `sendCommand`/`get_available_models` + `get_state` + `loadEnabledModelPatterns` logic; `lastWarning` replaces `lastModelSwitchError`).
-- [ ] Update `lib/screens/editor_screen.dart`: change field type from `PiRpcService` to `AiProvider`, update all call sites. No behavioural change.
-- [ ] Verify: `flutter analyze` clean, app runs identically.
+- [x] Create `lib/services/ai_provider.dart` with the abstract class (`AiProvider`, `AiProviderModels`, `AiProviderError`, shared `buildPromptMessage`).
+- [x] Move `_buildPromptMessage` from `PiRpcService` into `AiProvider` as a shared static method.
+- [x] Rename `lib/services/pi_rpc_service.dart` → `lib/services/pi_provider.dart`; class `PiRpcService` → `PiProvider implements AiProvider`.
+- [x] Adapt `PiProvider` to satisfy the interface (`fetchModels` absorbs warm-up + 3 parallel fetches + filtering; `lastWarning` replaces `lastModelSwitchError`).
+- [x] Update `lib/screens/editor_screen.dart`: field type `AiProvider`, all call sites updated (`fetchModels`, `streamEdit`, `abort`, `dispose`, `lastWarning`, `AiProviderError`). No behavioural change.
+- [x] Delete old `lib/services/pi_rpc_service.dart`.
+- [x] Verify: `flutter analyze` clean — **No issues found**.
 
 ### Phase 2 — Implement Claude Code provider
 

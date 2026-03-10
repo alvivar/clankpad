@@ -6,7 +6,8 @@ import 'package:flutter/services.dart';
 
 import '../models/editor_tab.dart';
 import '../models/intents.dart';
-import '../services/pi_rpc_service.dart';
+import '../services/ai_provider.dart';
+import '../services/pi_provider.dart';
 import '../state/editor_state.dart';
 import '../widgets/ai_diff_view.dart';
 import '../widgets/ai_prompt_popup.dart' show AiModelSettings, AiPromptPopup;
@@ -75,7 +76,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // Owned as a field so the process is killed if the screen is disposed while
   // a request is in-flight.
-  final _piRpcService = PiRpcService();
+  final AiProvider _aiProvider = PiProvider();
 
   // ── Model / thinking state (session-only) ───────────────────────────────────
 
@@ -328,7 +329,7 @@ class _EditorScreenState extends State<EditorScreen> {
     _diffFocusNode.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
-    _piRpcService.dispose();
+    _aiProvider.dispose();
     super.dispose();
   }
 
@@ -483,74 +484,47 @@ class _EditorScreenState extends State<EditorScreen> {
       controller.setEditTarget(highlight.start, highlight.end);
     }
 
-    // Pre-warm Pi and fetch the model list once per session. Runs concurrently
-    // with the user typing their prompt — silent on error (submit still works).
+    // Fetch the model list once per session. Runs concurrently with the user
+    // typing their prompt — silent on error (submit still works).
     if (_availableModels.isEmpty && !_modelsLoading) {
       _modelsLoading = true;
-      _piRpcService
-          .warmUp()
-          .then((_) {
-            return Future.wait<dynamic>([
-              _piRpcService.sendCommand({'type': 'get_available_models'}),
-              // get_state is best-effort — wrap so a failure doesn't poison
-              // the whole Future.wait and leave the model list empty.
-              _piRpcService
-                  .sendCommand({'type': 'get_state'})
-                  .catchError((_) => <String, dynamic>{}),
-              PiRpcService.loadEnabledModelPatterns(),
-            ]);
-          })
-          .then((results) {
+      _aiProvider
+          .fetchModels()
+          .then((result) {
             if (!mounted) return;
-            final modelsResp = results[0] as Map<String, dynamic>;
-            final stateResp = results[1] as Map<String, dynamic>;
-            final patterns = results[2] as List<String>?;
-            final all = (modelsResp['data']['models'] as List)
-                .cast<Map<String, dynamic>>();
-            // Apply enabledModels filter from ~/.pi/agent/settings.json.
-            // Fall back to full list if patterns are null/empty or every
-            // model is excluded (avoids a blank dropdown on bad config).
-            final filtered = (patterns != null && patterns.isNotEmpty)
-                ? all
-                      .where(
-                        (m) => PiRpcService.matchesEnabledPattern(
-                          '${m['provider']}/${m['id']}',
-                          patterns,
-                        ),
-                      )
-                      .toList()
-                : all;
-            final models = filtered.isNotEmpty ? filtered : all;
+            final models = result.models;
+
             // Seed model + thinking level. Priority:
             //   1. Persisted preference from last session (if model still exists)
-            //   2. Pi's live state via get_state (if model is in the list)
-            //   3. No selection — Pi uses its configured default
-            final stateData = stateResp['data'] as Map<String, dynamic>?;
-            final piLevel = stateData?['thinkingLevel'] as String? ?? 'off';
-            final piModel = stateData?['model'] as Map<String, dynamic>?;
-            final piModelId = piModel?['id'] as String?;
-            final piProvider = piModel?['provider'] as String?;
-
+            //   2. Provider's suggested model (e.g. Pi's live state)
+            //   3. No selection — provider uses its configured default
             bool modelInList(String? provider, String? id) =>
                 provider != null &&
                 id != null &&
-                models.any((m) => m['id'] == id && m['provider'] == provider);
+                models.any(
+                  (m) => m['id'] == id && m['provider'] == provider,
+                );
 
-            // Try persisted preference first, then Pi's live model.
             String? seedProvider;
             String? seedModelId;
-            if (modelInList(_state.lastModelProvider, _state.lastModelId)) {
+            if (modelInList(
+              _state.lastModelProvider,
+              _state.lastModelId,
+            )) {
               seedProvider = _state.lastModelProvider;
               seedModelId = _state.lastModelId;
-            } else if (modelInList(piProvider, piModelId)) {
-              seedProvider = piProvider;
-              seedModelId = piModelId;
+            } else if (modelInList(
+              result.suggestedProvider,
+              result.suggestedModelId,
+            )) {
+              seedProvider = result.suggestedProvider;
+              seedModelId = result.suggestedModelId;
             }
 
-            // Thinking level: persisted preference, then Pi's live state.
+            // Thinking level: persisted preference, then provider suggestion.
             final seedLevel = _state.lastThinkingLevel != null
                 ? _normaliseLevel(_state.lastThinkingLevel!)
-                : _normaliseLevel(piLevel);
+                : _normaliseLevel(result.suggestedThinkingLevel);
 
             setState(() {
               _availableModels = models;
@@ -662,7 +636,7 @@ class _EditorScreenState extends State<EditorScreen> {
     bool diffOpened = false;
 
     try {
-      await for (final chunk in _piRpcService.streamEdit(
+      await for (final chunk in _aiProvider.streamEdit(
         documentText: docText,
         editTarget: editTarget,
         userInstruction: prompt,
@@ -709,11 +683,11 @@ class _EditorScreenState extends State<EditorScreen> {
 
       // Stream completed normally. Surface a non-fatal model-switch warning
       // if Pi rejected set_model / set_thinking_level (prompt still ran).
-      final switchErr = _piRpcService.lastModelSwitchError;
+      final switchErr = _aiProvider.lastWarning;
       if (switchErr != null && mounted) {
         setState(() => _errorBanner = 'Model switch failed: $switchErr');
       }
-    } on PiRpcError catch (e) {
+    } on AiProviderError catch (e) {
       if (!mounted) return;
       setState(() => _errorBanner = e.message);
     } catch (e) {
@@ -733,7 +707,7 @@ class _EditorScreenState extends State<EditorScreen> {
   /// Aborts the in-flight Pi request and immediately unlocks the editor.
   /// Only valid while the loading state is active (before the diff opens).
   void _cancelAiRequest() {
-    _piRpcService.abort();
+    _aiProvider.abort();
     setState(() => _editorReadOnly = false);
   }
 
@@ -781,7 +755,7 @@ class _EditorScreenState extends State<EditorScreen> {
   void _rejectDiff() {
     // Abort Pi if the stream is still running (e.g. user rejects while
     // tokens are still arriving). No-op if the stream has already finished.
-    _piRpcService.abort();
+    _aiProvider.abort();
     _snapshotTab.controller.clearEditTarget();
     _snapshotTabId = null;
     // Text is unchanged — no controller update needed.

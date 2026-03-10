@@ -2,22 +2,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-/// Thrown when Pi fails to complete the editing request.
-class PiRpcError implements Exception {
-  final String message;
-  const PiRpcError(this.message);
+import 'ai_provider.dart';
 
-  @override
-  String toString() => message;
-}
-
-/// Drives Pi's RPC subprocess (`pi --mode rpc`) for AI-assisted text editing.
+/// [AiProvider] backed by Pi's RPC subprocess (`pi --mode rpc`).
 ///
-/// Pi is spawned on the first [warmUp] or [streamEdit] call and kept alive
+/// Pi is spawned on the first [fetchModels] or [streamEdit] call and kept alive
 /// between invocations. Pi owns all auth and model configuration — Clankpad
 /// has no API key management.
-class PiRpcService {
-  PiRpcService({this.piExecutable = 'pi'});
+class PiProvider implements AiProvider {
+  PiProvider({this.piExecutable = 'pi'});
 
   /// Executable name or absolute path. Defaults to `pi` (resolved via PATH).
   final String piExecutable;
@@ -39,23 +32,79 @@ class PiRpcService {
   // Set when set_model or set_thinking_level returns success: false.
   // Cleared at the start of each streamEdit call. Callers read this after
   // the stream ends to surface a non-fatal warning.
-  String? _lastModelSwitchError;
+  String? _lastWarning;
 
-  /// Non-null after a streamEdit call if set_model or set_thinking_level
-  /// was rejected by Pi. The prompt still ran with Pi's current model.
-  String? get lastModelSwitchError => _lastModelSwitchError;
+  @override
+  String get name => 'Pi';
+
+  @override
+  String? get lastWarning => _lastWarning;
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
-  /// Pre-warms the Pi process in the background. Called when the Ctrl+K popup
-  /// opens so the process is ready before the user submits.
-  Future<void> warmUp() => _ensureRunning();
+  @override
+  Future<AiProviderModels> fetchModels() async {
+    await _ensureRunning();
+
+    final results = await Future.wait<dynamic>([
+      sendCommand({'type': 'get_available_models'}),
+      // get_state is best-effort — wrap so a failure doesn't poison
+      // the whole Future.wait and leave the model list empty.
+      sendCommand({'type': 'get_state'}).catchError(
+        (_) => <String, dynamic>{},
+      ),
+      loadEnabledModelPatterns(),
+    ]);
+
+    final modelsResp = results[0] as Map<String, dynamic>;
+    final stateResp = results[1] as Map<String, dynamic>;
+    final patterns = results[2] as List<String>?;
+
+    final all =
+        (modelsResp['data']['models'] as List).cast<Map<String, dynamic>>();
+
+    // Apply enabledModels filter from ~/.pi/agent/settings.json.
+    // Fall back to full list if patterns are null/empty or every
+    // model is excluded (avoids a blank dropdown on bad config).
+    final filtered =
+        (patterns != null && patterns.isNotEmpty)
+            ? all
+                .where(
+                  (m) => matchesEnabledPattern(
+                    '${m['provider']}/${m['id']}',
+                    patterns,
+                  ),
+                )
+                .toList()
+            : all;
+    final models = filtered.isNotEmpty ? filtered : all;
+
+    // Extract Pi's live state for seeding suggestions.
+    final stateData = stateResp['data'] as Map<String, dynamic>?;
+    final piLevel = stateData?['thinkingLevel'] as String? ?? 'off';
+    final piModel = stateData?['model'] as Map<String, dynamic>?;
+    final piModelId = piModel?['id'] as String?;
+    final piProvider = piModel?['provider'] as String?;
+
+    // Only suggest the model if it's in the (possibly filtered) list.
+    final inList =
+        piModelId != null &&
+        piProvider != null &&
+        models.any((m) => m['id'] == piModelId && m['provider'] == piProvider);
+
+    return AiProviderModels(
+      models: models,
+      suggestedProvider: inList ? piProvider : null,
+      suggestedModelId: inList ? piModelId : null,
+      suggestedThinkingLevel: piLevel,
+    );
+  }
 
   /// Sends a command with a unique `id` and awaits its `response` event.
   ///
   /// Used only for out-of-band queries (e.g. `get_available_models`) that need
-  /// data back before streaming starts. Throws [PiRpcError] on timeout (5 s)
-  /// or `success: false`.
+  /// data back before streaming starts. Throws [AiProviderError] on timeout
+  /// (5 s) or `success: false`.
   Future<Map<String, dynamic>> sendCommand(Map<String, dynamic> cmd) async {
     await _ensureRunning();
     final id = 'c${_cmdCounter++}';
@@ -67,11 +116,11 @@ class PiRpcService {
       const Duration(seconds: 5),
       onTimeout: () {
         _pendingCommands.remove(id);
-        throw PiRpcError("Command timed out: ${cmd['type']}");
+        throw AiProviderError("Command timed out: ${cmd['type']}");
       },
     );
     if (response['success'] == false) {
-      throw PiRpcError(
+      throw AiProviderError(
         response['error'] as String? ?? "Command failed: ${cmd['type']}",
       );
     }
@@ -86,7 +135,8 @@ class PiRpcService {
   /// models, so no guard is needed here.
   ///
   /// Completes normally when `agent_end` is received — including after [abort].
-  /// Throws [PiRpcError] on process launch failure or unrecoverable model error.
+  /// Throws [AiProviderError] on process launch failure or unrecoverable error.
+  @override
   Stream<String> streamEdit({
     required String documentText,
     required String editTarget,
@@ -96,7 +146,7 @@ class PiRpcService {
     String thinkingLevel = 'off',
     int? insertOffset,
   }) async* {
-    _lastModelSwitchError = null; // clear from any previous call
+    _lastWarning = null; // clear from any previous call
     await _ensureRunning();
 
     final controller = StreamController<String>();
@@ -121,7 +171,7 @@ class PiRpcService {
     _process!.stdin.writeln(
       jsonEncode({
         'type': 'prompt',
-        'message': _buildPromptMessage(
+        'message': AiProvider.buildPromptMessage(
           documentText,
           editTarget,
           userInstruction,
@@ -161,7 +211,7 @@ class PiRpcService {
                 event['error'] as String? ?? 'set_thinking_level failed';
           }
           if (event['command'] == 'prompt' && event['success'] != true) {
-            throw const PiRpcError(
+            throw const AiProviderError(
               'Pi process exited unexpectedly — try again.',
             );
           }
@@ -188,7 +238,9 @@ class PiRpcService {
 
         // All retries exhausted.
         if (type == 'auto_retry_end' && event['success'] == false) {
-          throw const PiRpcError('Pi process exited unexpectedly — try again.');
+          throw const AiProviderError(
+            'Pi process exited unexpectedly — try again.',
+          );
         }
       }
     } finally {
@@ -199,10 +251,12 @@ class PiRpcService {
       }
     }
 
-    _lastModelSwitchError = modelSwitchError;
+    _lastWarning = modelSwitchError;
 
     if (!agentEndReceived) {
-      throw const PiRpcError('Pi process exited unexpectedly — try again.');
+      throw const AiProviderError(
+        'Pi process exited unexpectedly — try again.',
+      );
     }
   }
 
@@ -210,6 +264,7 @@ class PiRpcService {
   ///
   /// Pi stops generation and emits `agent_end`, completing the stream normally.
   /// The process stays warm. Safe to call when no stream is active — no-op.
+  @override
   void abort() {
     final proc = _process;
     if (proc == null) return;
@@ -221,9 +276,10 @@ class PiRpcService {
 
   /// Cancels the stdout subscription, completes pending commands with an error,
   /// and kills Pi.
+  @override
   Future<void> dispose() async {
     for (final c in _pendingCommands.values) {
-      c.completeError(const PiRpcError('Service disposed'));
+      c.completeError(const AiProviderError('Service disposed'));
     }
     _pendingCommands.clear();
 
@@ -257,7 +313,7 @@ class PiRpcService {
         runInShell: true,
       );
     } on ProcessException {
-      throw PiRpcError(
+      throw AiProviderError(
         '`$piExecutable` not found — install it with '
         '`npm install -g @mariozechner/pi-coding-agent` and ensure it\'s on PATH.',
       );
@@ -306,7 +362,9 @@ class PiRpcService {
     _stdoutSub = null;
     // Complete any in-flight sendCommand calls with an error.
     for (final c in _pendingCommands.values) {
-      c.completeError(const PiRpcError('Pi process exited unexpectedly.'));
+      c.completeError(
+        const AiProviderError('Pi process exited unexpectedly.'),
+      );
     }
     _pendingCommands.clear();
     final c = _lineController;
@@ -327,8 +385,6 @@ class PiRpcService {
       await proc.stdin.close();
     } catch (_) {}
   }
-
-  // ── Helpers ─────────────────────────────────────────────────────────────────
 
   // ── enabledModels filtering ─────────────────────────────────────────────────
 
@@ -363,37 +419,5 @@ class PiRpcService {
       if (RegExp('^$segments\$').hasMatch(modelId)) return true;
     }
     return false;
-  }
-
-  static String _buildPromptMessage(
-    String documentText,
-    String editTarget,
-    String userInstruction, {
-    int? insertOffset,
-  }) {
-    if (editTarget.isEmpty) {
-      // Insert mode: embed a [CURSOR] marker so the model sees the full
-      // document as a coherent whole with a precise insertion point.
-      final offset = insertOffset ?? documentText.length;
-      final before = documentText.substring(0, offset);
-      final after = documentText.substring(offset);
-      return 'Document:\n'
-          '$before[CURSOR]$after\n'
-          '\n'
-          'Instruction: $userInstruction\n'
-          '\n'
-          'IMPORTANT: Reply with ONLY the text to insert at [CURSOR]. '
-          'Do not include surrounding blank lines. No explanations, no preamble.';
-    }
-    return 'Document context:\n'
-        '$documentText\n'
-        '\n'
-        'Edit target:\n'
-        '$editTarget\n'
-        '\n'
-        'Instruction: $userInstruction\n'
-        '\n'
-        'IMPORTANT: Reply with ONLY the transformed text. '
-        'No explanations, no preamble.';
   }
 }
