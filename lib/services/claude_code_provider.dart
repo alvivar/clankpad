@@ -86,6 +86,7 @@ class ClaudeCodeProvider implements AiProvider {
       'stream-json',
       '--verbose',
       '--include-partial-messages',
+      '--no-session-persistence',
     ];
 
     if (modelId != null) {
@@ -124,16 +125,15 @@ class ClaudeCodeProvider implements AiProvider {
 
     // Collect stderr for error reporting if the process fails.
     final stderrBuf = StringBuffer();
-    proc.stderr
-        .transform(utf8.decoder)
-        .listen((data) => stderrBuf.write(data));
+    proc.stderr.transform(utf8.decoder).listen((data) => stderrBuf.write(data));
 
     bool anyOutput = false;
 
     try {
-      await for (final line in proc.stdout
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())) {
+      await for (final line
+          in proc.stdout
+              .transform(utf8.decoder)
+              .transform(const LineSplitter())) {
         if (line.trim().isEmpty) continue;
 
         final Map<String, dynamic> event;
