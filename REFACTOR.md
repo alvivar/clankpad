@@ -137,17 +137,22 @@ Three phases. Each leaves the app in a working, `flutter analyze`-clean state.
 - [x] `--model` flag passed when `modelId` is non-null (future-proofing).
 - [x] Verify: `flutter analyze` clean — **No issues found**.
 
-### Phase 3 — Wire up provider selection + persistence
+### Phase 3 — Wire up provider selection + persistence ✅
 
 **Goal**: user can switch between Pi and Claude Code in the Ctrl+K popup; choice persists across restarts.
 
-- [ ] `EditorScreen`: hold `Map<String, AiProvider>` (`'pi'` → `PiProvider`, `'claude_code'` → `ClaudeCodeProvider`); add `_selectedProviderKey` state field.
-- [ ] `AiPromptPopup` / `AiModelSettings`: add provider-level selector (segmented button or small dropdown) above the model picker row.
-- [ ] When provider is Claude Code: hide model dropdown (no models to pick); show/hide thinking level based on provider capability.
-- [ ] Model fetching: call `_activeProvider.fetchModels()` only when provider changes or on first open; cache per provider.
-- [ ] `EditorState` + `SessionService`: add `lastProviderKey` field; persist in `session.json`; restore with silent fallback if provider unavailable.
-- [ ] Update `SPEC.md` with provider selection docs, session schema, and shortcut/UX notes.
-- [ ] Verify: `flutter analyze` clean, both providers work end-to-end.
+- [x] `EditorScreen`: `Map<String, AiProvider>` with `'pi'` → `PiProvider`, `'claude_code'` → `ClaudeCodeProvider`; `_selectedProviderKey` seeded from `_state.lastProviderKey` in `initState`; `_activeProvider` getter; all call sites updated.
+- [x] `EditorScreen`: extracted `_fetchModelsForActiveProvider()` and `_applyCachedModels()` helpers; per-provider model cache (`_modelCache`).
+- [x] `EditorScreen`: `_onProviderChanged()` handler — switches provider, clears model/thinking selection, applies cache or triggers fetch.
+- [x] `AiModelSettings`: added `providerKey` and `providerNames` fields.
+- [x] `AiPromptPopup`: added `onProviderChanged` callback; `_ProviderPicker` dropdown in footer (hidden when only 1 provider registered).
+- [x] When Claude Code is selected: model dropdown auto-hides (empty list); thinking dropdown auto-hides (no models → no `reasoning` flag).
+- [x] `EditorState`: added `lastProviderKey` field; restored in `restoreFromSession()`.
+- [x] `SessionService`: persists `lastProviderKey` in `session.json`.
+- [x] `_submitAiPrompt`: persists `_state.lastProviderKey` alongside model/thinking.
+- [x] `dispose()`: disposes all providers in the map.
+- [x] `SPEC.md`: updated ToC, §4 restructured with provider abstraction overview + Pi (§4.0) + Claude Code (§4.1) sections; session schema updated with `lastProviderKey`.
+- [x] Verify: `flutter analyze` clean — **No issues found**.
 
 ---
 

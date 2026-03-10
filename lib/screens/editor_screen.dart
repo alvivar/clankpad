@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../models/editor_tab.dart';
 import '../models/intents.dart';
 import '../services/ai_provider.dart';
+import '../services/claude_code_provider.dart';
 import '../services/pi_provider.dart';
 import '../state/editor_state.dart';
 import '../widgets/ai_diff_view.dart';
@@ -74,16 +75,28 @@ class _EditorScreenState extends State<EditorScreen> {
   // after accept / reject.
   final FocusNode _diffFocusNode = FocusNode();
 
-  // Owned as a field so the process is killed if the screen is disposed while
-  // a request is in-flight.
-  final AiProvider _aiProvider = PiProvider();
+  // ── AI providers ─────────────────────────────────────────────────────────────
 
-  // ── Model / thinking state (session-only) ───────────────────────────────────
+  // All registered providers. Processes are killed if the screen is disposed
+  // while a request is in-flight.
+  final Map<String, AiProvider> _providers = {
+    'pi': PiProvider(),
+    'claude_code': ClaudeCodeProvider(),
+  };
+
+  late String _selectedProviderKey;
+
+  AiProvider get _activeProvider => _providers[_selectedProviderKey]!;
+
+  // ── Model / thinking state ──────────────────────────────────────────────────
+
+  // Per-provider model cache — fetched once per provider, reused on switch-back.
+  final Map<String, List<Map<String, dynamic>>> _modelCache = {};
 
   List<Map<String, dynamic>> _availableModels = [];
   bool _modelsLoading = false;
   String? _selectedProvider;
-  String? _selectedModelId; // null = let Pi use its configured default
+  String? _selectedModelId; // null = let provider use its configured default
   String _thinkingLevel = 'off';
 
   /// Maps Pi's full thinking-level range to the four values shown in the UI.
@@ -313,6 +326,13 @@ class _EditorScreenState extends State<EditorScreen> {
     super.initState();
     _state.addListener(_onEditorStateChanged);
 
+    // Seed provider selection from persisted state; fall back to 'pi'.
+    final persisted = _state.lastProviderKey;
+    _selectedProviderKey =
+        (persisted != null && _providers.containsKey(persisted))
+            ? persisted
+            : 'pi';
+
     // Show any session-restore notices (missing files, etc.) once the first
     // frame has been drawn so there is a valid BuildContext for the dialog.
     if (_state.hasStartupNotices) {
@@ -329,7 +349,9 @@ class _EditorScreenState extends State<EditorScreen> {
     _diffFocusNode.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
-    _aiProvider.dispose();
+    for (final p in _providers.values) {
+      p.dispose();
+    }
     super.dispose();
   }
 
@@ -484,62 +506,109 @@ class _EditorScreenState extends State<EditorScreen> {
       controller.setEditTarget(highlight.start, highlight.end);
     }
 
-    // Fetch the model list once per session. Runs concurrently with the user
-    // typing their prompt — silent on error (submit still works).
-    if (_availableModels.isEmpty && !_modelsLoading) {
-      _modelsLoading = true;
-      _aiProvider
-          .fetchModels()
-          .then((result) {
-            if (!mounted) return;
-            final models = result.models;
+    _fetchModelsForActiveProvider();
+  }
 
-            // Seed model + thinking level. Priority:
-            //   1. Persisted preference from last session (if model still exists)
-            //   2. Provider's suggested model (e.g. Pi's live state)
-            //   3. No selection — provider uses its configured default
-            bool modelInList(String? provider, String? id) =>
-                provider != null &&
-                id != null &&
-                models.any(
-                  (m) => m['id'] == id && m['provider'] == provider,
-                );
+  // ── Provider switching ───────────────────────────────────────────────────────
 
-            String? seedProvider;
-            String? seedModelId;
-            if (modelInList(
-              _state.lastModelProvider,
-              _state.lastModelId,
-            )) {
-              seedProvider = _state.lastModelProvider;
-              seedModelId = _state.lastModelId;
-            } else if (modelInList(
-              result.suggestedProvider,
-              result.suggestedModelId,
-            )) {
-              seedProvider = result.suggestedProvider;
-              seedModelId = result.suggestedModelId;
-            }
+  void _onProviderChanged(String key) {
+    if (key == _selectedProviderKey) return;
+    setState(() {
+      _selectedProviderKey = key;
+      _selectedProvider = null;
+      _selectedModelId = null;
+      _thinkingLevel = 'off';
 
-            // Thinking level: persisted preference, then provider suggestion.
-            final seedLevel = _state.lastThinkingLevel != null
-                ? _normaliseLevel(_state.lastThinkingLevel!)
-                : _normaliseLevel(result.suggestedThinkingLevel);
+      // Apply cached models immediately if available; otherwise fetch.
+      final cached = _modelCache[key];
+      if (cached != null) {
+        _availableModels = cached;
+        _modelsLoading = false;
+      } else {
+        _availableModels = [];
+        _modelsLoading = false;
+      }
+    });
+    _fetchModelsForActiveProvider();
+  }
 
-            setState(() {
-              _availableModels = models;
-              _modelsLoading = false;
-              _thinkingLevel = seedLevel;
-              if (seedProvider != null) {
-                _selectedProvider = seedProvider;
-                _selectedModelId = seedModelId;
-              }
-            });
-          })
-          .catchError((_) {
-            if (mounted) setState(() => _modelsLoading = false);
-          });
+  // ── Model fetching ──────────────────────────────────────────────────────────
+
+  /// Fetches models for the active provider if not already cached. Runs async
+  /// and updates state when complete. Silent on error (submit still works).
+  void _fetchModelsForActiveProvider() {
+    final key = _selectedProviderKey;
+
+    // Already cached — apply and seed.
+    final cached = _modelCache[key];
+    if (cached != null && _availableModels.isNotEmpty) return;
+    if (cached != null) {
+      _applyCachedModels(key, cached, null);
+      return;
     }
+
+    if (_modelsLoading) return;
+    setState(() => _modelsLoading = true);
+
+    _activeProvider
+        .fetchModels()
+        .then((result) {
+          if (!mounted || _selectedProviderKey != key) return;
+          _modelCache[key] = result.models;
+          _applyCachedModels(key, result.models, result);
+        })
+        .catchError((_) {
+          if (mounted && _selectedProviderKey == key) {
+            setState(() => _modelsLoading = false);
+          }
+        });
+  }
+
+  /// Applies a model list and seeds selection from persisted prefs or provider
+  /// suggestions.
+  void _applyCachedModels(
+    String providerKey,
+    List<Map<String, dynamic>> models,
+    AiProviderModels? fetchResult,
+  ) {
+    // Seed model + thinking level. Priority:
+    //   1. Persisted preference from last session (if model still exists)
+    //   2. Provider's suggested model (e.g. Pi's live state)
+    //   3. No selection — provider uses its configured default
+    bool modelInList(String? provider, String? id) =>
+        provider != null &&
+        id != null &&
+        models.any((m) => m['id'] == id && m['provider'] == provider);
+
+    String? seedProvider;
+    String? seedModelId;
+    if (modelInList(_state.lastModelProvider, _state.lastModelId)) {
+      seedProvider = _state.lastModelProvider;
+      seedModelId = _state.lastModelId;
+    } else if (fetchResult != null &&
+        modelInList(
+          fetchResult.suggestedProvider,
+          fetchResult.suggestedModelId,
+        )) {
+      seedProvider = fetchResult.suggestedProvider;
+      seedModelId = fetchResult.suggestedModelId;
+    }
+
+    // Thinking level: persisted preference, then provider suggestion.
+    final suggestedLevel = fetchResult?.suggestedThinkingLevel ?? 'off';
+    final seedLevel = _state.lastThinkingLevel != null
+        ? _normaliseLevel(_state.lastThinkingLevel!)
+        : _normaliseLevel(suggestedLevel);
+
+    setState(() {
+      _availableModels = models;
+      _modelsLoading = false;
+      _thinkingLevel = seedLevel;
+      if (seedProvider != null) {
+        _selectedProvider = seedProvider;
+        _selectedModelId = seedModelId;
+      }
+    });
   }
 
   // ── Prompt history ───────────────────────────────────────────────────────────
@@ -618,9 +687,10 @@ class _EditorScreenState extends State<EditorScreen> {
     }
     _historyIndex = _promptHistory.length;
 
-    // Persist model + thinking level so the next session starts with the
-    // same selection. Written to EditorState fields; the debounced session
-    // save picks them up automatically.
+    // Persist provider + model + thinking level so the next session starts
+    // with the same selection. Written to EditorState fields; the debounced
+    // session save picks them up automatically.
+    _state.lastProviderKey = _selectedProviderKey;
     _state.lastModelProvider = _selectedProvider;
     _state.lastModelId = _selectedModelId;
     _state.lastThinkingLevel = _thinkingLevel;
@@ -636,7 +706,7 @@ class _EditorScreenState extends State<EditorScreen> {
     bool diffOpened = false;
 
     try {
-      await for (final chunk in _aiProvider.streamEdit(
+      await for (final chunk in _activeProvider.streamEdit(
         documentText: docText,
         editTarget: editTarget,
         userInstruction: prompt,
@@ -683,7 +753,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
       // Stream completed normally. Surface a non-fatal model-switch warning
       // if Pi rejected set_model / set_thinking_level (prompt still ran).
-      final switchErr = _aiProvider.lastWarning;
+      final switchErr = _activeProvider.lastWarning;
       if (switchErr != null && mounted) {
         setState(() => _errorBanner = 'Model switch failed: $switchErr');
       }
@@ -707,7 +777,7 @@ class _EditorScreenState extends State<EditorScreen> {
   /// Aborts the in-flight Pi request and immediately unlocks the editor.
   /// Only valid while the loading state is active (before the diff opens).
   void _cancelAiRequest() {
-    _aiProvider.abort();
+    _activeProvider.abort();
     setState(() => _editorReadOnly = false);
   }
 
@@ -755,7 +825,7 @@ class _EditorScreenState extends State<EditorScreen> {
   void _rejectDiff() {
     // Abort Pi if the stream is still running (e.g. user rejects while
     // tokens are still arriving). No-op if the stream has already finished.
-    _aiProvider.abort();
+    _activeProvider.abort();
     _snapshotTab.controller.clearEditTarget();
     _snapshotTabId = null;
     // Text is unchanged — no controller update needed.
@@ -1039,6 +1109,11 @@ class _EditorScreenState extends State<EditorScreen> {
                           selectedProvider: _selectedProvider,
                           selectedModelId: _selectedModelId,
                           thinkingLevel: _thinkingLevel,
+                          providerKey: _selectedProviderKey,
+                          providerNames: {
+                            for (final e in _providers.entries)
+                              e.key: e.value.name,
+                          },
                         ),
                         onModelChanged: (provider, modelId) => setState(() {
                           _selectedProvider = provider;
@@ -1046,6 +1121,7 @@ class _EditorScreenState extends State<EditorScreen> {
                         }),
                         onThinkingLevelChanged: (level) =>
                             setState(() => _thinkingLevel = level),
+                        onProviderChanged: _onProviderChanged,
                       ),
 
                     if (_diffVisible)

@@ -37,6 +37,7 @@ class EditorState extends ChangeNotifier {
   // Last-used model and thinking level. Persisted in session.json so the
   // user's choice survives app restarts. Silently ignored on restore if the
   // model is no longer available in Pi's config.
+  String? lastProviderKey;
   String? lastModelProvider;
   String? lastModelId;
   String? lastThinkingLevel;
@@ -204,6 +205,7 @@ class EditorState extends ChangeNotifier {
     _untitledCounter = (json['untitledCounter'] as int?) ?? _untitledCounter;
     final storedActiveIndex = (json['activeTabIndex'] as int?) ?? 0;
 
+    lastProviderKey = json['lastProviderKey'] as String?;
     lastModelProvider = json['lastModelProvider'] as String?;
     lastModelId = json['lastModelId'] as String?;
     lastThinkingLevel = json['lastThinkingLevel'] as String?;

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 /// Snapshot of model/thinking state passed from EditorScreen to the popup.
-/// Kept as a data class so the popup receives a single param instead of five.
+/// Kept as a data class so the popup receives a single param instead of many.
 class AiModelSettings {
   final List<Map<String, dynamic>> availableModels;
   final bool loading;
@@ -10,12 +10,20 @@ class AiModelSettings {
   final String? selectedModelId;
   final String thinkingLevel;
 
+  /// Currently active AI provider key (e.g. 'pi', 'claude_code').
+  final String providerKey;
+
+  /// All registered provider keys → display names.
+  final Map<String, String> providerNames;
+
   const AiModelSettings({
     required this.availableModels,
     required this.loading,
     required this.selectedProvider,
     required this.selectedModelId,
     required this.thinkingLevel,
+    required this.providerKey,
+    required this.providerNames,
   });
 }
 
@@ -40,6 +48,9 @@ class AiPromptPopup extends StatefulWidget {
   /// Called when the user picks a different thinking level.
   final void Function(String level)? onThinkingLevelChanged;
 
+  /// Called when the user picks a different AI provider.
+  final void Function(String providerKey)? onProviderChanged;
+
   const AiPromptPopup({
     super.key,
     required this.onDismiss,
@@ -49,6 +60,7 @@ class AiPromptPopup extends StatefulWidget {
     this.modelSettings,
     this.onModelChanged,
     this.onThinkingLevelChanged,
+    this.onProviderChanged,
   });
 
   @override
@@ -256,13 +268,20 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                       ),
                     ),
 
-                    // ── Model / thinking footer ─────────────────────────────
+                    // ── Provider / model / thinking footer ────────────────────
                     if (settings != null) ...[
                       const Divider(height: 1),
                       SizedBox(
                         height: 32,
                         child: Row(
                           children: [
+                            if (settings.providerNames.length > 1)
+                              _ProviderPicker(
+                                providerKey: settings.providerKey,
+                                providerNames: settings.providerNames,
+                                onChanged: widget.onProviderChanged,
+                                onFocusBack: _textFieldFocusNode.requestFocus,
+                              ),
                             _ModelPicker(
                               settings: settings,
                               onChanged: widget.onModelChanged,
@@ -373,6 +392,45 @@ class _ModelPicker extends StatelessWidget {
         onChanged?.call(m['provider'] as String, m['id'] as String);
         onFocusBack?.call();
       },
+    );
+  }
+}
+
+class _ProviderPicker extends StatelessWidget {
+  const _ProviderPicker({
+    required this.providerKey,
+    required this.providerNames,
+    this.onChanged,
+    this.onFocusBack,
+  });
+
+  final String providerKey;
+  final Map<String, String> providerNames;
+  final void Function(String key)? onChanged;
+  final VoidCallback? onFocusBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: DropdownButton<String>(
+        value: providerKey,
+        isDense: true,
+        underline: const SizedBox.shrink(),
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: colorScheme.onSurface,
+        ),
+        items: providerNames.entries.map((e) {
+          return DropdownMenuItem<String>(value: e.key, child: Text(e.value));
+        }).toList(),
+        onChanged: (key) {
+          if (key != null) onChanged?.call(key);
+          onFocusBack?.call();
+        },
+      ),
     );
   }
 }

@@ -24,12 +24,9 @@ This document describes the current behavior and structure of the implementation
 - 3. Data formats
   - 3.1 Session file location
   - 3.2 `session.json` structure and semantics
-- 4. Pi RPC integration (required)
-  - 4.1 Prerequisites
-  - 4.2 Process lifecycle
-  - 4.3 Commands and events used
-  - 4.4 Prompt formats (edit vs insert)
-  - 4.5 Model list + enabledModels filtering
+- 4. AI provider integration
+  - 4.0 Pi RPC integration
+  - 4.1 Claude Code integration
 - 5. Acceptance scenarios (behavioral tests)
 - Appendix A — Reference UI structure
 - Appendix B — Data model (Flutter)
@@ -50,7 +47,7 @@ Basic flow:
 - On launch, one empty tab is ready to type in.
 - The user can create more tabs, write in each one, save, open files, and close tabs.
 - When the app is closed and reopened, all tabs are restored (including unsaved content) from a local session file.
-- Inline AI edits are powered by **Pi RPC**. Pi is required for a compatible Clankpad implementation.
+- Inline AI edits are powered by pluggable AI providers (Pi RPC, Claude Code). At least one provider must be available.
 
 Out of scope in the current implementation:
 
@@ -398,6 +395,7 @@ Top-level keys:
 - `nextTabId` (int)
 - `untitledCounter` (int)
 - `tabs` (list)
+- `lastProviderKey` (string, optional) — last AI provider key (`pi` / `claude_code`)
 - `lastModelProvider` (string, optional) — last AI model provider selected by the user
 - `lastModelId` (string, optional) — last AI model ID selected by the user
 - `lastThinkingLevel` (string, optional) — last thinking level selected by the user (`off` / `low` / `medium` / `high`)
@@ -424,6 +422,7 @@ Example:
   "activeTabIndex": 1,
   "nextTabId": 6,
   "untitledCounter": 4,
+  "lastProviderKey": "pi",
   "lastModelProvider": "anthropic",
   "lastModelId": "claude-sonnet-4-20250514",
   "lastThinkingLevel": "medium",
@@ -453,11 +452,24 @@ Example:
 
 ---
 
-## 4. Pi RPC integration (required)
+## 4. AI provider integration
 
-Clankpad delegates all AI calls to **Pi** (`pi --mode rpc`), spawned as a child process. Clankpad does not call any model APIs directly.
+Clankpad supports multiple AI backends through the `AiProvider` abstraction (`lib/services/ai_provider.dart`). Each provider implements `fetchModels()`, `streamEdit()`, `abort()`, and `dispose()`. Prompt construction is shared via `AiProvider.buildPromptMessage()`.
 
-### 4.1 Prerequisites
+### Registered providers
+
+| Key            | Class                | Backend                                      |
+| -------------- | -------------------- | -------------------------------------------- |
+| `pi`           | `PiProvider`         | Pi RPC subprocess (`pi --mode rpc`)          |
+| `claude_code`  | `ClaudeCodeProvider` | Claude Code CLI (`claude -p --output-format stream-json`) |
+
+The user selects the active provider from a dropdown in the Ctrl+K popup footer. The choice persists across sessions via `lastProviderKey` in `session.json`. If the persisted provider is unavailable on restart, Clankpad falls back to `pi`.
+
+### 4.0 Pi RPC integration
+
+Clankpad's primary AI backend is **Pi** (`pi --mode rpc`), spawned as a long-lived child process. Clankpad does not call any model APIs directly.
+
+### 4.0.1 Prerequisites
 
 - Pi must be installed and configured on the user’s machine.
 - Default expectation: `pi` is available on `PATH`.
@@ -468,7 +480,7 @@ Install example:
 - `npm install -g @mariozechner/pi-coding-agent`
 - then `pi /login` (or configure API keys via Pi)
 
-### 4.2 Process lifecycle
+### 4.0.2 Process lifecycle
 
 - Pi is spawned on first use (or when pre-warmed on popup open).
 - Pi is kept alive (“warm”) between requests.
@@ -488,7 +500,7 @@ Abort:
 - Clankpad sends `{"type":"abort"}`.
 - Pi should stop generation and emit `agent_end`.
 
-### 4.3 Commands and events used
+### 4.0.3 Commands and events used
 
 Commands sent (in this order on submit):
 
@@ -513,7 +525,7 @@ Errors:
 
   `Pi process exited unexpectedly — try again.`
 
-### 4.4 Prompt formats (edit vs insert)
+### 4.0.4 Prompt formats (edit vs insert)
 
 Edit mode message:
 
@@ -542,7 +554,7 @@ Instruction: <user instruction>
 IMPORTANT: Reply with ONLY the text to insert at [CURSOR]. Do not include surrounding blank lines. No explanations, no preamble.
 ```
 
-### 4.5 Model list + enabledModels filtering
+### 4.0.5 Model list + enabledModels filtering
 
 When the AI prompt popup opens, Clankpad pre-warms Pi and fetches:
 
@@ -560,6 +572,34 @@ UI:
 - The popup footer shows:
   - a model dropdown
   - a thinking level dropdown (`off/low/medium/high`) only when the effective model has `reasoning: true`
+
+### 4.1 Claude Code integration
+
+Claude Code (`claude -p`) is an alternative AI backend. Unlike Pi, it uses a **one-shot process per request** rather than a long-lived RPC subprocess.
+
+#### Process model
+
+- Each `streamEdit` call spawns `claude -p "<prompt>" --output-format stream-json --verbose --include-partial-messages`.
+- If `modelId` is non-null, `--model <modelId>` is appended.
+- The process streams newline-delimited JSON to stdout; tokens are extracted from events matching `type == "stream_event"` where `event.delta.type == "text_delta"`.
+- Completion = process exit. No explicit `agent_end` event.
+- Abort = kill the process.
+- `fetchModels()` returns an empty list — Claude Code manages its own model via `claude config`.
+
+#### Prerequisites
+
+- Claude Code CLI (`claude`) must be installed and on PATH.
+- Auth is managed by Claude Code (Anthropic API key or OAuth).
+
+#### Differences from Pi
+
+| Aspect           | Pi                               | Claude Code                        |
+| ---------------- | -------------------------------- | ---------------------------------- |
+| Lifecycle        | Long-lived warm process          | One-shot per request               |
+| Model list       | `get_available_models` RPC       | Not queryable; empty model picker  |
+| Model switching  | `set_model` RPC command          | `--model` CLI flag                 |
+| Thinking level   | `set_thinking_level` RPC command | Not supported via CLI              |
+| Abort            | `{"type":"abort"}` on stdin      | Kill process                       |
 
 ---
 

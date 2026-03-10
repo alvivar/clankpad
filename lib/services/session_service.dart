@@ -122,6 +122,8 @@ class SessionService {
       'nextTabId': _state.nextTabId,
       'untitledCounter': _state.untitledCounter,
       'tabs': tabsJson,
+      if (_state.lastProviderKey != null)
+        'lastProviderKey': _state.lastProviderKey,
       if (_state.lastModelProvider != null)
         'lastModelProvider': _state.lastModelProvider,
       if (_state.lastModelId != null) 'lastModelId': _state.lastModelId,
