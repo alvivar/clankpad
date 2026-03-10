@@ -521,27 +521,44 @@ class _EditorScreenState extends State<EditorScreen> {
                       .toList()
                 : all;
             final models = filtered.isNotEmpty ? filtered : all;
-            // Seed model + thinking level from Pi's live state.
+            // Seed model + thinking level. Priority:
+            //   1. Persisted preference from last session (if model still exists)
+            //   2. Pi's live state via get_state (if model is in the list)
+            //   3. No selection — Pi uses its configured default
             final stateData = stateResp['data'] as Map<String, dynamic>?;
             final piLevel = stateData?['thinkingLevel'] as String? ?? 'off';
             final piModel = stateData?['model'] as Map<String, dynamic>?;
             final piModelId = piModel?['id'] as String?;
             final piProvider = piModel?['provider'] as String?;
-            // Only seed the selection if Pi's current model is in the
-            // (possibly filtered) list — avoids selecting a hidden model.
-            final inList =
-                piModelId != null &&
-                piProvider != null &&
-                models.any(
-                  (m) => m['id'] == piModelId && m['provider'] == piProvider,
-                );
+
+            bool modelInList(String? provider, String? id) =>
+                provider != null &&
+                id != null &&
+                models.any((m) => m['id'] == id && m['provider'] == provider);
+
+            // Try persisted preference first, then Pi's live model.
+            String? seedProvider;
+            String? seedModelId;
+            if (modelInList(_state.lastModelProvider, _state.lastModelId)) {
+              seedProvider = _state.lastModelProvider;
+              seedModelId = _state.lastModelId;
+            } else if (modelInList(piProvider, piModelId)) {
+              seedProvider = piProvider;
+              seedModelId = piModelId;
+            }
+
+            // Thinking level: persisted preference, then Pi's live state.
+            final seedLevel = _state.lastThinkingLevel != null
+                ? _normaliseLevel(_state.lastThinkingLevel!)
+                : _normaliseLevel(piLevel);
+
             setState(() {
               _availableModels = models;
               _modelsLoading = false;
-              _thinkingLevel = _normaliseLevel(piLevel);
-              if (inList) {
-                _selectedModelId = piModelId;
-                _selectedProvider = piProvider;
+              _thinkingLevel = seedLevel;
+              if (seedProvider != null) {
+                _selectedProvider = seedProvider;
+                _selectedModelId = seedModelId;
               }
             });
           })
@@ -626,6 +643,13 @@ class _EditorScreenState extends State<EditorScreen> {
       if (_promptHistory.length > 50) _promptHistory.removeAt(0);
     }
     _historyIndex = _promptHistory.length;
+
+    // Persist model + thinking level so the next session starts with the
+    // same selection. Written to EditorState fields; the debounced session
+    // save picks them up automatically.
+    _state.lastModelProvider = _selectedProvider;
+    _state.lastModelId = _selectedModelId;
+    _state.lastThinkingLevel = _thinkingLevel;
 
     setState(() {
       _aiPromptVisible = false;

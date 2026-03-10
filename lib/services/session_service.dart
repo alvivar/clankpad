@@ -122,6 +122,11 @@ class SessionService {
       'nextTabId': _state.nextTabId,
       'untitledCounter': _state.untitledCounter,
       'tabs': tabsJson,
+      if (_state.lastModelProvider != null)
+        'lastModelProvider': _state.lastModelProvider,
+      if (_state.lastModelId != null) 'lastModelId': _state.lastModelId,
+      if (_state.lastThinkingLevel != null)
+        'lastThinkingLevel': _state.lastThinkingLevel,
     });
   }
 

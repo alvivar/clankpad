@@ -32,6 +32,15 @@ class EditorState extends ChangeNotifier {
   // on every keystroke or subscribing to every controller individually.
   VoidCallback? onAnyChange;
 
+  // ── Persisted AI preferences ────────────────────────────────────────────────
+
+  // Last-used model and thinking level. Persisted in session.json so the
+  // user's choice survives app restarts. Silently ignored on restore if the
+  // model is no longer available in Pi's config.
+  String? lastModelProvider;
+  String? lastModelId;
+  String? lastThinkingLevel;
+
   // Notices collected during session restore (missing files, etc.).
   // Consumed once by EditorScreen via takeStartupNotices().
   final List<String> _startupNotices = [];
@@ -194,6 +203,10 @@ class EditorState extends ChangeNotifier {
     _nextTabId = (json['nextTabId'] as int?) ?? _nextTabId;
     _untitledCounter = (json['untitledCounter'] as int?) ?? _untitledCounter;
     final storedActiveIndex = (json['activeTabIndex'] as int?) ?? 0;
+
+    lastModelProvider = json['lastModelProvider'] as String?;
+    lastModelId = json['lastModelId'] as String?;
+    lastThinkingLevel = json['lastThinkingLevel'] as String?;
 
     // Dispose the initial tab created by the constructor.
     for (final tab in _tabs) {

@@ -165,10 +165,10 @@ This is the canonical shortcut list for the current implementation.
 
 #### Editor text shortcuts (while editor has focus)
 
-| Shortcut    | Action                                                                                                               |
-| ----------- | -------------------------------------------------------------------------------------------------------------------- |
-| `Tab`       | Indent selection by 4 spaces, or insert spaces to next tab stop (tab size 4) when no selection                    |
-| `Shift+Tab` | Outdent selection to previous tab stop, or outdent current line's leading indentation when no selection            |
+| Shortcut    | Action                                                                                                  |
+| ----------- | ------------------------------------------------------------------------------------------------------- |
+| `Tab`       | Indent selection by 4 spaces, or insert spaces to next tab stop (tab size 4) when no selection          |
+| `Shift+Tab` | Outdent selection to previous tab stop, or outdent current line's leading indentation when no selection |
 
 #### Find bar shortcuts (while the find field has focus)
 
@@ -398,6 +398,9 @@ Top-level keys:
 - `nextTabId` (int)
 - `untitledCounter` (int)
 - `tabs` (list)
+- `lastModelProvider` (string, optional) — last AI model provider selected by the user
+- `lastModelId` (string, optional) — last AI model ID selected by the user
+- `lastThinkingLevel` (string, optional) — last thinking level selected by the user (`off` / `low` / `medium` / `high`)
 
 Per-tab entry keys:
 
@@ -421,6 +424,9 @@ Example:
   "activeTabIndex": 1,
   "nextTabId": 6,
   "untitledCounter": 4,
+  "lastModelProvider": "anthropic",
+  "lastModelId": "claude-sonnet-4-20250514",
+  "lastThinkingLevel": "medium",
   "tabs": [
     {
       "id": 3,
@@ -1230,10 +1236,10 @@ handle Enter, Escape as today
 
 A thin footer row sits below the text field, separated by a `Divider`:
 
-- **Model** (left): `DropdownButton` listing models from `get_available_models`, filtered by `enabledModels` from `~/.pi/agent/settings.json`. Each item shows `provider  ·  Model Name`. Shows `···` while loading, disappears on error. Seeded from Pi's current model via `get_state`.
-- **Thinking level** (right): `DropdownButton` — `Thinking off · Low thinking · Medium thinking · High thinking`. **Only shown when the selected model has `reasoning: true`.** Seeded from Pi's live thinking level via `get_state`, normalised via `_normaliseLevel()`. `set_thinking_level` is always sent on submit — Pi ignores it for non-reasoning models.
+- **Model** (left): `DropdownButton` listing models from `get_available_models`, filtered by `enabledModels` from `~/.pi/agent/settings.json`. Each item shows `provider  ·  Model Name`. Shows `···` while loading, disappears on error. Seeded with priority: (1) persisted preference from `session.json`, (2) Pi's current model via `get_state`, (3) no selection. If the persisted model is no longer in the filtered list it is silently skipped.
+- **Thinking level** (right): `DropdownButton` — `Thinking off · Low thinking · Medium thinking · High thinking`. **Only shown when the selected model has `reasoning: true`.** Seeded with priority: (1) persisted preference from `session.json`, (2) Pi's live thinking level via `get_state`. Normalised via `_normaliseLevel()`. `set_thinking_level` is always sent on submit — Pi ignores it for non-reasoning models.
 
-Both selections are session-only (in memory).
+Both selections are persisted to `session.json` on submit (via `EditorState.lastModelProvider`, `lastModelId`, `lastThinkingLevel`) so the user's choice survives app restarts.
 
 **Loading state** (first popup open): model dropdown shows `···` and is disabled; thinking dropdown is hidden until an effective model can be resolved. Pi spawns in background; `setState` updates once all three parallel calls return.
 
@@ -1245,7 +1251,7 @@ Both selections are session-only (in memory).
 
 1. `PiRpcService.warmUp()` → `_ensureRunning()` spawns Pi if not already alive
 2. Parallel fetch: `get_available_models` + `get_state` + `loadEnabledModelPatterns`
-3. Filter models by `enabledModels`; seed thinking level from `get_state`; if Pi's current model exists in filtered list seed provider/model selection
+3. Filter models by `enabledModels`; seed model and thinking level with priority: persisted `session.json` preference → Pi's `get_state` → no selection
 
 **On submit** — prepended to existing write sequence, one `flush()`:
 
