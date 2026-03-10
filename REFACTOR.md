@@ -107,6 +107,47 @@ abstract class AiProvider {
 
 ---
 
+## Implementation phases
+
+Three phases. Each leaves the app in a working, `flutter analyze`-clean state.
+
+### Phase 1 — Extract interface + refactor Pi into it
+
+**Goal**: introduce the `AiProvider` abstraction without adding any new functionality. App works exactly as before.
+
+- [ ] Create `lib/services/ai_provider.dart` with the abstract class.
+- [ ] Move `_buildPromptMessage` from `PiRpcService` into `AiProvider` as a shared static/base method.
+- [ ] Rename `lib/services/pi_rpc_service.dart` → `lib/services/pi_provider.dart`; class `PiRpcService` → `PiProvider implements AiProvider`.
+- [ ] Adapt `PiProvider` to satisfy the interface (`fetchModels` wraps the existing `sendCommand`/`get_available_models` + `get_state` + `loadEnabledModelPatterns` logic; `lastWarning` replaces `lastModelSwitchError`).
+- [ ] Update `lib/screens/editor_screen.dart`: change field type from `PiRpcService` to `AiProvider`, update all call sites. No behavioural change.
+- [ ] Verify: `flutter analyze` clean, app runs identically.
+
+### Phase 2 — Implement Claude Code provider
+
+**Goal**: add `ClaudeCodeProvider` implementing `AiProvider`. No UI wiring yet — it's a standalone, testable unit.
+
+- [ ] Create `lib/services/claude_code_provider.dart`.
+- [ ] Spawn `claude -p "<prompt>" --output-format stream-json --verbose --include-partial-messages --allowedTools ""`.
+- [ ] Parse `stream-json` lines: filter `type == "stream_event"` where `event.delta.type == "text_delta"`, yield `event.delta.text`.
+- [ ] `abort()` → kill the process.
+- [ ] `fetchModels()` → return empty list (Claude Code manages its own model; no queryable model list).
+- [ ] `dispose()` → kill process if running.
+- [ ] Verify: `flutter analyze` clean.
+
+### Phase 3 — Wire up provider selection + persistence
+
+**Goal**: user can switch between Pi and Claude Code in the Ctrl+K popup; choice persists across restarts.
+
+- [ ] `EditorScreen`: hold `Map<String, AiProvider>` (`'pi'` → `PiProvider`, `'claude_code'` → `ClaudeCodeProvider`); add `_selectedProviderKey` state field.
+- [ ] `AiPromptPopup` / `AiModelSettings`: add provider-level selector (segmented button or small dropdown) above the model picker row.
+- [ ] When provider is Claude Code: hide model dropdown (no models to pick); show/hide thinking level based on provider capability.
+- [ ] Model fetching: call `_activeProvider.fetchModels()` only when provider changes or on first open; cache per provider.
+- [ ] `EditorState` + `SessionService`: add `lastProviderKey` field; persist in `session.json`; restore with silent fallback if provider unavailable.
+- [ ] Update `SPEC.md` with provider selection docs, session schema, and shortcut/UX notes.
+- [ ] Verify: `flutter analyze` clean, both providers work end-to-end.
+
+---
+
 ## Summary
 
 This is a clean seam. The current `PiRpcService` already encapsulates all the Pi-specific protocol details. We extract an interface, wrap Claude Code's `claude -p --output-format stream-json` in the same interface, and add a provider selector to the popup. ~3 files changed, ~1–2 new files. Prompt logic and all UI stay untouched.
