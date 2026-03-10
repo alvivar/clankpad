@@ -123,17 +123,19 @@ Three phases. Each leaves the app in a working, `flutter analyze`-clean state.
 - [x] Delete old `lib/services/pi_rpc_service.dart`.
 - [x] Verify: `flutter analyze` clean — **No issues found**.
 
-### Phase 2 — Implement Claude Code provider
+### Phase 2 — Implement Claude Code provider ✅
 
 **Goal**: add `ClaudeCodeProvider` implementing `AiProvider`. No UI wiring yet — it's a standalone, testable unit.
 
-- [ ] Create `lib/services/claude_code_provider.dart`.
-- [ ] Spawn `claude -p "<prompt>" --output-format stream-json --verbose --include-partial-messages --allowedTools ""`.
-- [ ] Parse `stream-json` lines: filter `type == "stream_event"` where `event.delta.type == "text_delta"`, yield `event.delta.text`.
-- [ ] `abort()` → kill the process.
-- [ ] `fetchModels()` → return empty list (Claude Code manages its own model; no queryable model list).
-- [ ] `dispose()` → kill process if running.
-- [ ] Verify: `flutter analyze` clean.
+- [x] Create `lib/services/claude_code_provider.dart`.
+- [x] Spawn `claude -p "<prompt>" --output-format stream-json --verbose --include-partial-messages`.
+- [x] Parse `stream-json` lines: filter `type == "stream_event"` where `event.delta.type == "text_delta"`, yield `event.delta.text`.
+- [x] `abort()` → kill the process, set `_aborted` flag to suppress non-zero exit error.
+- [x] `fetchModels()` → return empty `AiProviderModels` (Claude Code manages its own model; no queryable list).
+- [x] `dispose()` → kill process if running.
+- [x] Error handling: stderr captured; surfaced as `AiProviderError` when process exits non-zero with no output (and not user-aborted).
+- [x] `--model` flag passed when `modelId` is non-null (future-proofing).
+- [x] Verify: `flutter analyze` clean — **No issues found**.
 
 ### Phase 3 — Wire up provider selection + persistence
 
