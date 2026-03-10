@@ -82,7 +82,6 @@ class ClaudeCodeProvider implements AiProvider {
 
     final args = [
       '-p',
-      prompt,
       '--output-format',
       'stream-json',
       '--verbose',
@@ -116,6 +115,12 @@ class ClaudeCodeProvider implements AiProvider {
     }
 
     _activeProcess = proc;
+
+    // Write the prompt to stdin instead of passing it as a CLI argument.
+    // This avoids Windows cmd.exe character limits (~8K) and shell quoting
+    // issues with newlines, quotes, and special characters in the document.
+    proc.stdin.writeln(prompt);
+    await proc.stdin.close();
 
     // Collect stderr for error reporting if the process fails.
     final stderrBuf = StringBuffer();

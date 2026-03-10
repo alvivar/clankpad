@@ -16,6 +16,10 @@ class AiModelSettings {
   /// All registered provider keys → display names.
   final Map<String, String> providerNames;
 
+  /// Which thinking levels to show in the picker.
+  /// Defaults to all four; Claude Code omits 'off'.
+  final List<String> supportedThinkingLevels;
+
   const AiModelSettings({
     required this.availableModels,
     required this.loading,
@@ -24,6 +28,7 @@ class AiModelSettings {
     required this.thinkingLevel,
     required this.providerKey,
     required this.providerNames,
+    this.supportedThinkingLevels = const ['off', 'low', 'medium', 'high'],
   });
 }
 
@@ -224,9 +229,11 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                         if (event.logicalKey == LogicalKeyboardKey.tab &&
                             HardwareKeyboard.instance.isShiftPressed &&
                             modelSupportsThinking) {
-                          const levels = ['off', 'low', 'medium', 'high'];
+                          final levels =
+                              settings?.supportedThinkingLevels ??
+                              const ['off', 'low', 'medium', 'high'];
                           final cur = levels.indexOf(
-                            widget.modelSettings?.thinkingLevel ?? 'off',
+                            widget.modelSettings?.thinkingLevel ?? levels.first,
                           );
                           final next = (cur + 1) % levels.length;
                           widget.onThinkingLevelChanged?.call(levels[next]);
@@ -291,6 +298,7 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                             if (modelSupportsThinking)
                               _ThinkingPicker(
                                 level: settings.thinkingLevel,
+                                levels: settings.supportedThinkingLevels,
                                 onChanged: widget.onThinkingLevelChanged,
                                 onFocusBack: _textFieldFocusNode.requestFocus,
                               ),
@@ -438,34 +446,41 @@ class _ProviderPicker extends StatelessWidget {
 class _ThinkingPicker extends StatelessWidget {
   const _ThinkingPicker({
     required this.level,
+    required this.levels,
     this.onChanged,
     this.onFocusBack,
   });
 
   final String level;
+  final List<String> levels;
   final void Function(String level)? onChanged;
   final VoidCallback? onFocusBack;
 
-  static const _levels = [
-    ('off', 'Thinking off'),
-    ('low', 'Low thinking'),
-    ('medium', 'Medium thinking'),
-    ('high', 'High thinking'),
-  ];
+  static const _labels = {
+    'off': 'Thinking off',
+    'low': 'Low thinking',
+    'medium': 'Medium thinking',
+    'high': 'High thinking',
+  };
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    // If the current level isn't in the supported list, clamp to first.
+    final effectiveLevel = levels.contains(level) ? level : levels.first;
     return DropdownButton<String>(
-      value: level,
+      value: effectiveLevel,
       isDense: true,
       underline: const SizedBox.shrink(),
       style: TextStyle(fontSize: 12, color: colorScheme.onSurface),
-      items: _levels.map((t) {
-        return DropdownMenuItem<String>(value: t.$1, child: Text(t.$2));
+      items: levels.map((l) {
+        return DropdownMenuItem<String>(
+          value: l,
+          child: Text(_labels[l] ?? l),
+        );
       }).toList(),
       onChanged: (v) {
-        onChanged?.call(v ?? level);
+        onChanged?.call(v ?? effectiveLevel);
         onFocusBack?.call();
       },
     );

@@ -1108,6 +1108,10 @@ class _EditorScreenState extends State<EditorScreen> {
                             for (final e in _providers.entries)
                               e.key: e.value.name,
                           },
+                          supportedThinkingLevels:
+                              _selectedProviderKey == 'claude_code'
+                                  ? const ['low', 'medium', 'high']
+                                  : const ['off', 'low', 'medium', 'high'],
                         ),
                         onModelChanged: (provider, modelId) => setState(() {
                           _selectedProvider = provider;
