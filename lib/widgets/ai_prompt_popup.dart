@@ -141,6 +141,8 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
             DoNothingAndStopPropagationIntent(),
         SingleActivator(LogicalKeyboardKey.keyF, control: true):
             DoNothingAndStopPropagationIntent(),
+        SingleActivator(LogicalKeyboardKey.tab, control: true):
+            DoNothingAndStopPropagationIntent(),
       },
       child: Align(
         alignment: Alignment.topCenter,
@@ -220,6 +222,21 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                               m['provider'] as String,
                               m['id'] as String,
                             );
+                          }
+                          return KeyEventResult.handled;
+                        }
+
+                        // Ctrl+Tab — cycle provider forward.
+                        if (event.logicalKey == LogicalKeyboardKey.tab &&
+                            HardwareKeyboard.instance.isControlPressed) {
+                          final names = settings?.providerNames ?? const {};
+                          if (names.length > 1) {
+                            final keys = names.keys.toList();
+                            final cur = keys.indexOf(
+                              settings?.providerKey ?? keys.first,
+                            );
+                            final next = (cur + 1) % keys.length;
+                            widget.onProviderChanged?.call(keys[next]);
                           }
                           return KeyEventResult.handled;
                         }
@@ -474,10 +491,7 @@ class _ThinkingPicker extends StatelessWidget {
       underline: const SizedBox.shrink(),
       style: TextStyle(fontSize: 12, color: colorScheme.onSurface),
       items: levels.map((l) {
-        return DropdownMenuItem<String>(
-          value: l,
-          child: Text(_labels[l] ?? l),
-        );
+        return DropdownMenuItem<String>(value: l, child: Text(_labels[l] ?? l));
       }).toList(),
       onChanged: (v) {
         onChanged?.call(v ?? effectiveLevel);
