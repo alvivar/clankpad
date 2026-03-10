@@ -28,11 +28,36 @@ class ClaudeCodeProvider implements AiProvider {
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
+  // Hardcoded model catalogue. Update when Anthropic ships new models.
+  static const _models = <Map<String, dynamic>>[
+    {
+      'id': 'claude-opus-4-6',
+      'name': 'Claude Opus 4.6',
+      'provider': 'anthropic',
+      'reasoning': true,
+    },
+    {
+      'id': 'claude-sonnet-4-6',
+      'name': 'Claude Sonnet 4.6',
+      'provider': 'anthropic',
+      'reasoning': true,
+    },
+    {
+      'id': 'claude-haiku-4-5',
+      'name': 'Claude Haiku 4.5',
+      'provider': 'anthropic',
+      'reasoning': true,
+    },
+  ];
+
   @override
   Future<AiProviderModels> fetchModels() async {
-    // Claude Code does not expose a queryable model list.
-    // The user configures the model via `claude config`.
-    return const AiProviderModels();
+    return const AiProviderModels(
+      models: _models,
+      suggestedProvider: 'anthropic',
+      suggestedModelId: 'claude-sonnet-4-6',
+      suggestedThinkingLevel: 'medium',
+    );
   }
 
   @override
@@ -64,9 +89,13 @@ class ClaudeCodeProvider implements AiProvider {
       '--include-partial-messages',
     ];
 
-    // Pass model override if specified (e.g. from a future model picker).
     if (modelId != null) {
       args.addAll(['--model', modelId]);
+    }
+
+    // Map thinking level to --effort flag. Omit when 'off' (Claude's default).
+    if (thinkingLevel != 'off') {
+      args.addAll(['--effort', thinkingLevel]);
     }
 
     final Process proc;

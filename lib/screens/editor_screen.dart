@@ -330,8 +330,8 @@ class _EditorScreenState extends State<EditorScreen> {
     final persisted = _state.lastProviderKey;
     _selectedProviderKey =
         (persisted != null && _providers.containsKey(persisted))
-            ? persisted
-            : 'pi';
+        ? persisted
+        : 'pi';
 
     // Show any session-restore notices (missing files, etc.) once the first
     // frame has been drawn so there is a valid BuildContext for the dialog.
@@ -518,16 +518,10 @@ class _EditorScreenState extends State<EditorScreen> {
       _selectedProvider = null;
       _selectedModelId = null;
       _thinkingLevel = 'off';
-
-      // Apply cached models immediately if available; otherwise fetch.
-      final cached = _modelCache[key];
-      if (cached != null) {
-        _availableModels = cached;
-        _modelsLoading = false;
-      } else {
-        _availableModels = [];
-        _modelsLoading = false;
-      }
+      // Clear models so _fetchModelsForActiveProvider goes through the
+      // seeding path (_applyCachedModels) even when a cache entry exists.
+      _availableModels = [];
+      _modelsLoading = false;
     });
     _fetchModelsForActiveProvider();
   }
