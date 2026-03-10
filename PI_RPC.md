@@ -41,15 +41,15 @@ With images:
 
 ```json
 {
-    "type": "prompt",
-    "message": "What's in this image?",
-    "images": [
-        {
-            "type": "image",
-            "data": "base64-encoded-data",
-            "mimeType": "image/png"
-        }
-    ]
+  "type": "prompt",
+  "message": "What's in this image?",
+  "images": [
+    {
+      "type": "image",
+      "data": "base64-encoded-data",
+      "mimeType": "image/png"
+    }
+  ]
 }
 ```
 
@@ -88,15 +88,15 @@ With images:
 
 ```json
 {
-    "type": "steer",
-    "message": "Look at this instead",
-    "images": [
-        {
-            "type": "image",
-            "data": "base64-encoded-data",
-            "mimeType": "image/png"
-        }
-    ]
+  "type": "steer",
+  "message": "Look at this instead",
+  "images": [
+    {
+      "type": "image",
+      "data": "base64-encoded-data",
+      "mimeType": "image/png"
+    }
+  ]
 }
 ```
 
@@ -122,15 +122,15 @@ With images:
 
 ```json
 {
-    "type": "follow_up",
-    "message": "Also check this image",
-    "images": [
-        {
-            "type": "image",
-            "data": "base64-encoded-data",
-            "mimeType": "image/png"
-        }
-    ]
+  "type": "follow_up",
+  "message": "Also check this image",
+  "images": [
+    {
+      "type": "image",
+      "data": "base64-encoded-data",
+      "mimeType": "image/png"
+    }
+  ]
 }
 ```
 
@@ -176,10 +176,10 @@ Response:
 
 ```json
 {
-    "type": "response",
-    "command": "new_session",
-    "success": true,
-    "data": { "cancelled": false }
+  "type": "response",
+  "command": "new_session",
+  "success": true,
+  "data": { "cancelled": false }
 }
 ```
 
@@ -187,10 +187,10 @@ If an extension cancelled:
 
 ```json
 {
-    "type": "response",
-    "command": "new_session",
-    "success": true,
-    "data": { "cancelled": true }
+  "type": "response",
+  "command": "new_session",
+  "success": true,
+  "data": { "cancelled": true }
 }
 ```
 
@@ -259,9 +259,9 @@ Switch to a specific model.
 
 ```json
 {
-    "type": "set_model",
-    "provider": "anthropic",
-    "modelId": "claude-sonnet-4-20250514"
+  "type": "set_model",
+  "provider": "anthropic",
+  "modelId": "claude-sonnet-4-20250514"
 }
 ```
 
@@ -354,10 +354,10 @@ Response:
 
 ```json
 {
-    "type": "response",
-    "command": "cycle_thinking_level",
-    "success": true,
-    "data": { "level": "high" }
+  "type": "response",
+  "command": "cycle_thinking_level",
+  "success": true,
+  "data": { "level": "high" }
 }
 ```
 
@@ -421,15 +421,15 @@ Response:
 
 ```json
 {
-    "type": "response",
-    "command": "compact",
-    "success": true,
-    "data": {
-        "summary": "Summary of conversation...",
-        "firstKeptEntryId": "abc123",
-        "tokensBefore": 150000,
-        "details": {}
-    }
+  "type": "response",
+  "command": "compact",
+  "success": true,
+  "data": {
+    "summary": "Summary of conversation...",
+    "firstKeptEntryId": "abc123",
+    "tokensBefore": 150000,
+    "details": {}
+  }
 }
 ```
 
@@ -491,15 +491,15 @@ Response:
 
 ```json
 {
-    "type": "response",
-    "command": "bash",
-    "success": true,
-    "data": {
-        "output": "total 48\ndrwxr-xr-x ...",
-        "exitCode": 0,
-        "cancelled": false,
-        "truncated": false
-    }
+  "type": "response",
+  "command": "bash",
+  "success": true,
+  "data": {
+    "output": "total 48\ndrwxr-xr-x ...",
+    "exitCode": 0,
+    "cancelled": false,
+    "truncated": false
+  }
 }
 ```
 
@@ -507,16 +507,16 @@ If output was truncated, includes `fullOutputPath`:
 
 ```json
 {
-    "type": "response",
-    "command": "bash",
-    "success": true,
-    "data": {
-        "output": "truncated output...",
-        "exitCode": 0,
-        "cancelled": false,
-        "truncated": true,
-        "fullOutputPath": "/tmp/pi-bash-abc123.log"
-    }
+  "type": "response",
+  "command": "bash",
+  "success": true,
+  "data": {
+    "output": "truncated output...",
+    "exitCode": 0,
+    "cancelled": false,
+    "truncated": true,
+    "fullOutputPath": "/tmp/pi-bash-abc123.log"
+  }
 }
 ```
 
@@ -568,26 +568,26 @@ Response:
 
 ```json
 {
-    "type": "response",
-    "command": "get_session_stats",
-    "success": true,
-    "data": {
-        "sessionFile": "/path/to/session.jsonl",
-        "sessionId": "abc123",
-        "userMessages": 5,
-        "assistantMessages": 5,
-        "toolCalls": 12,
-        "toolResults": 12,
-        "totalMessages": 22,
-        "tokens": {
-            "input": 50000,
-            "output": 10000,
-            "cacheRead": 40000,
-            "cacheWrite": 5000,
-            "total": 105000
-        },
-        "cost": 0.45
-    }
+  "type": "response",
+  "command": "get_session_stats",
+  "success": true,
+  "data": {
+    "sessionFile": "/path/to/session.jsonl",
+    "sessionId": "abc123",
+    "userMessages": 5,
+    "assistantMessages": 5,
+    "toolCalls": 12,
+    "toolResults": 12,
+    "totalMessages": 22,
+    "tokens": {
+      "input": 50000,
+      "output": 10000,
+      "cacheRead": 40000,
+      "cacheWrite": 5000,
+      "total": 105000
+    },
+    "cost": 0.45
+  }
 }
 ```
 
@@ -609,10 +609,10 @@ Response:
 
 ```json
 {
-    "type": "response",
-    "command": "export_html",
-    "success": true,
-    "data": { "path": "/tmp/session.html" }
+  "type": "response",
+  "command": "export_html",
+  "success": true,
+  "data": { "path": "/tmp/session.html" }
 }
 ```
 
@@ -628,10 +628,10 @@ Response:
 
 ```json
 {
-    "type": "response",
-    "command": "switch_session",
-    "success": true,
-    "data": { "cancelled": false }
+  "type": "response",
+  "command": "switch_session",
+  "success": true,
+  "data": { "cancelled": false }
 }
 ```
 
@@ -639,10 +639,10 @@ If an extension cancelled the switch:
 
 ```json
 {
-    "type": "response",
-    "command": "switch_session",
-    "success": true,
-    "data": { "cancelled": true }
+  "type": "response",
+  "command": "switch_session",
+  "success": true,
+  "data": { "cancelled": true }
 }
 ```
 
@@ -658,10 +658,10 @@ Response:
 
 ```json
 {
-    "type": "response",
-    "command": "fork",
-    "success": true,
-    "data": { "text": "The original prompt text...", "cancelled": false }
+  "type": "response",
+  "command": "fork",
+  "success": true,
+  "data": { "text": "The original prompt text...", "cancelled": false }
 }
 ```
 
@@ -669,10 +669,10 @@ If an extension cancelled the fork:
 
 ```json
 {
-    "type": "response",
-    "command": "fork",
-    "success": true,
-    "data": { "text": "The original prompt text...", "cancelled": true }
+  "type": "response",
+  "command": "fork",
+  "success": true,
+  "data": { "text": "The original prompt text...", "cancelled": true }
 }
 ```
 
@@ -688,15 +688,15 @@ Response:
 
 ```json
 {
-    "type": "response",
-    "command": "get_fork_messages",
-    "success": true,
-    "data": {
-        "messages": [
-            { "entryId": "abc123", "text": "First prompt..." },
-            { "entryId": "def456", "text": "Second prompt..." }
-        ]
-    }
+  "type": "response",
+  "command": "get_fork_messages",
+  "success": true,
+  "data": {
+    "messages": [
+      { "entryId": "abc123", "text": "First prompt..." },
+      { "entryId": "def456", "text": "Second prompt..." }
+    ]
+  }
 }
 ```
 
@@ -712,10 +712,10 @@ Response:
 
 ```json
 {
-    "type": "response",
-    "command": "get_last_assistant_text",
-    "success": true,
-    "data": { "text": "The assistant's response..." }
+  "type": "response",
+  "command": "get_last_assistant_text",
+  "success": true,
+  "data": { "text": "The assistant's response..." }
 }
 ```
 
@@ -733,9 +733,9 @@ Response:
 
 ```json
 {
-    "type": "response",
-    "command": "set_session_name",
-    "success": true
+  "type": "response",
+  "command": "set_session_name",
+  "success": true
 }
 ```
 
@@ -755,33 +755,33 @@ Response:
 
 ```json
 {
-    "type": "response",
-    "command": "get_commands",
-    "success": true,
-    "data": {
-        "commands": [
-            {
-                "name": "session-name",
-                "description": "Set or clear session name",
-                "source": "extension",
-                "path": "/home/user/.pi/agent/extensions/session.ts"
-            },
-            {
-                "name": "fix-tests",
-                "description": "Fix failing tests",
-                "source": "prompt",
-                "location": "project",
-                "path": "/home/user/myproject/.pi/agent/prompts/fix-tests.md"
-            },
-            {
-                "name": "skill:brave-search",
-                "description": "Web search via Brave API",
-                "source": "skill",
-                "location": "user",
-                "path": "/home/user/.pi/agent/skills/brave-search/SKILL.md"
-            }
-        ]
-    }
+  "type": "response",
+  "command": "get_commands",
+  "success": true,
+  "data": {
+    "commands": [
+      {
+        "name": "session-name",
+        "description": "Set or clear session name",
+        "source": "extension",
+        "path": "/home/user/.pi/agent/extensions/session.ts"
+      },
+      {
+        "name": "fix-tests",
+        "description": "Fix failing tests",
+        "source": "prompt",
+        "location": "project",
+        "path": "/home/user/myproject/.pi/agent/prompts/fix-tests.md"
+      },
+      {
+        "name": "skill:brave-search",
+        "description": "Web search via Brave API",
+        "source": "skill",
+        "location": "user",
+        "path": "/home/user/.pi/agent/skills/brave-search/SKILL.md"
+      }
+    ]
+  }
 }
 ```
 
@@ -790,13 +790,13 @@ Each command has:
 - `name`: Command name (invoke with `/name`)
 - `description`: Human-readable description (optional for extension commands)
 - `source`: What kind of command:
-    - `"extension"`: Registered via `pi.registerCommand()` in an extension
-    - `"prompt"`: Loaded from a prompt template `.md` file
-    - `"skill"`: Loaded from a skill directory (name is prefixed with `skill:`)
+  - `"extension"`: Registered via `pi.registerCommand()` in an extension
+  - `"prompt"`: Loaded from a prompt template `.md` file
+  - `"skill"`: Loaded from a skill directory (name is prefixed with `skill:`)
 - `location`: Where it was loaded from (optional, not present for extensions):
-    - `"user"`: User-level (`~/.pi/agent/`)
-    - `"project"`: Project-level (`./.pi/agent/`)
-    - `"path"`: Explicit path via CLI or settings
+  - `"user"`: User-level (`~/.pi/agent/`)
+  - `"project"`: Project-level (`./.pi/agent/`)
+  - `"path"`: Explicit path via CLI or settings
 - `path`: Absolute file path to the command source (optional)
 
 **Note**: Built-in TUI commands (`/settings`, `/hotkeys`, etc.) are not included. They are handled only in interactive mode and would not execute if sent via `prompt`.
@@ -918,10 +918,10 @@ Emitted when a tool begins, streams progress, and completes execution.
 
 ```json
 {
-    "type": "tool_execution_start",
-    "toolCallId": "call_abc123",
-    "toolName": "bash",
-    "args": { "command": "ls -la" }
+  "type": "tool_execution_start",
+  "toolCallId": "call_abc123",
+  "toolName": "bash",
+  "args": { "command": "ls -la" }
 }
 ```
 
@@ -929,14 +929,14 @@ During execution, `tool_execution_update` events stream partial results (e.g., b
 
 ```json
 {
-    "type": "tool_execution_update",
-    "toolCallId": "call_abc123",
-    "toolName": "bash",
-    "args": { "command": "ls -la" },
-    "partialResult": {
-        "content": [{ "type": "text", "text": "partial output so far..." }],
-        "details": { "truncation": null, "fullOutputPath": null }
-    }
+  "type": "tool_execution_update",
+  "toolCallId": "call_abc123",
+  "toolName": "bash",
+  "args": { "command": "ls -la" },
+  "partialResult": {
+    "content": [{ "type": "text", "text": "partial output so far..." }],
+    "details": { "truncation": null, "fullOutputPath": null }
+  }
 }
 ```
 
@@ -969,15 +969,15 @@ The `reason` field is `"threshold"` (context getting large) or `"overflow"` (con
 
 ```json
 {
-    "type": "auto_compaction_end",
-    "result": {
-        "summary": "Summary of conversation...",
-        "firstKeptEntryId": "abc123",
-        "tokensBefore": 150000,
-        "details": {}
-    },
-    "aborted": false,
-    "willRetry": false
+  "type": "auto_compaction_end",
+  "result": {
+    "summary": "Summary of conversation...",
+    "firstKeptEntryId": "abc123",
+    "tokensBefore": 150000,
+    "details": {}
+  },
+  "aborted": false,
+  "willRetry": false
 }
 ```
 
@@ -993,19 +993,19 @@ Emitted when automatic retry is triggered after a transient error (overloaded, r
 
 ```json
 {
-    "type": "auto_retry_start",
-    "attempt": 1,
-    "maxAttempts": 3,
-    "delayMs": 2000,
-    "errorMessage": "529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}"
+  "type": "auto_retry_start",
+  "attempt": 1,
+  "maxAttempts": 3,
+  "delayMs": 2000,
+  "errorMessage": "529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}"
 }
 ```
 
 ```json
 {
-    "type": "auto_retry_end",
-    "success": true,
-    "attempt": 2
+  "type": "auto_retry_end",
+  "success": true,
+  "attempt": 2
 }
 ```
 
@@ -1013,10 +1013,10 @@ On final failure (max retries exceeded):
 
 ```json
 {
-    "type": "auto_retry_end",
-    "success": false,
-    "attempt": 3,
-    "finalError": "529 overloaded_error: Overloaded"
+  "type": "auto_retry_end",
+  "success": false,
+  "attempt": 3,
+  "finalError": "529 overloaded_error: Overloaded"
 }
 ```
 
@@ -1026,10 +1026,10 @@ Emitted when an extension throws an error.
 
 ```json
 {
-    "type": "extension_error",
-    "extensionPath": "/path/to/extension.ts",
-    "event": "tool_call",
-    "error": "Error message..."
+  "type": "extension_error",
+  "extensionPath": "/path/to/extension.ts",
+  "event": "tool_call",
+  "error": "Error message..."
 }
 ```
 
@@ -1067,12 +1067,12 @@ Prompt the user to choose from a list. Dialog methods with a `timeout` field inc
 
 ```json
 {
-    "type": "extension_ui_request",
-    "id": "uuid-1",
-    "method": "select",
-    "title": "Allow dangerous command?",
-    "options": ["Allow", "Block"],
-    "timeout": 10000
+  "type": "extension_ui_request",
+  "id": "uuid-1",
+  "method": "select",
+  "title": "Allow dangerous command?",
+  "options": ["Allow", "Block"],
+  "timeout": 10000
 }
 ```
 
@@ -1084,12 +1084,12 @@ Prompt the user for yes/no confirmation.
 
 ```json
 {
-    "type": "extension_ui_request",
-    "id": "uuid-2",
-    "method": "confirm",
-    "title": "Clear session?",
-    "message": "All messages will be lost.",
-    "timeout": 5000
+  "type": "extension_ui_request",
+  "id": "uuid-2",
+  "method": "confirm",
+  "title": "Clear session?",
+  "message": "All messages will be lost.",
+  "timeout": 5000
 }
 ```
 
@@ -1101,11 +1101,11 @@ Prompt the user for free-form text.
 
 ```json
 {
-    "type": "extension_ui_request",
-    "id": "uuid-3",
-    "method": "input",
-    "title": "Enter a value",
-    "placeholder": "type something..."
+  "type": "extension_ui_request",
+  "id": "uuid-3",
+  "method": "input",
+  "title": "Enter a value",
+  "placeholder": "type something..."
 }
 ```
 
@@ -1117,11 +1117,11 @@ Open a multi-line text editor with optional prefilled content.
 
 ```json
 {
-    "type": "extension_ui_request",
-    "id": "uuid-4",
-    "method": "editor",
-    "title": "Edit some text",
-    "prefill": "Line 1\nLine 2\nLine 3"
+  "type": "extension_ui_request",
+  "id": "uuid-4",
+  "method": "editor",
+  "title": "Edit some text",
+  "prefill": "Line 1\nLine 2\nLine 3"
 }
 ```
 
@@ -1133,11 +1133,11 @@ Display a notification. Fire-and-forget, no response expected.
 
 ```json
 {
-    "type": "extension_ui_request",
-    "id": "uuid-5",
-    "method": "notify",
-    "message": "Command blocked by user",
-    "notifyType": "warning"
+  "type": "extension_ui_request",
+  "id": "uuid-5",
+  "method": "notify",
+  "message": "Command blocked by user",
+  "notifyType": "warning"
 }
 ```
 
@@ -1149,11 +1149,11 @@ Set or clear a status entry in the footer/status bar. Fire-and-forget.
 
 ```json
 {
-    "type": "extension_ui_request",
-    "id": "uuid-6",
-    "method": "setStatus",
-    "statusKey": "my-ext",
-    "statusText": "Turn 3 running..."
+  "type": "extension_ui_request",
+  "id": "uuid-6",
+  "method": "setStatus",
+  "statusKey": "my-ext",
+  "statusText": "Turn 3 running..."
 }
 ```
 
@@ -1165,12 +1165,12 @@ Set or clear a widget (block of text lines) displayed above or below the editor.
 
 ```json
 {
-    "type": "extension_ui_request",
-    "id": "uuid-7",
-    "method": "setWidget",
-    "widgetKey": "my-ext",
-    "widgetLines": ["--- My Widget ---", "Line 1", "Line 2"],
-    "widgetPlacement": "aboveEditor"
+  "type": "extension_ui_request",
+  "id": "uuid-7",
+  "method": "setWidget",
+  "widgetKey": "my-ext",
+  "widgetLines": ["--- My Widget ---", "Line 1", "Line 2"],
+  "widgetPlacement": "aboveEditor"
 }
 ```
 
@@ -1182,10 +1182,10 @@ Set the terminal window/tab title. Fire-and-forget.
 
 ```json
 {
-    "type": "extension_ui_request",
-    "id": "uuid-8",
-    "method": "setTitle",
-    "title": "pi - my project"
+  "type": "extension_ui_request",
+  "id": "uuid-8",
+  "method": "setTitle",
+  "title": "pi - my project"
 }
 ```
 
@@ -1195,10 +1195,10 @@ Set the text in the input editor. Fire-and-forget.
 
 ```json
 {
-    "type": "extension_ui_request",
-    "id": "uuid-9",
-    "method": "set_editor_text",
-    "text": "prefilled text for the user"
+  "type": "extension_ui_request",
+  "id": "uuid-9",
+  "method": "set_editor_text",
+  "text": "prefilled text for the user"
 }
 ```
 
@@ -1232,10 +1232,10 @@ Failed commands return a response with `success: false`:
 
 ```json
 {
-    "type": "response",
-    "command": "set_model",
-    "success": false,
-    "error": "Model not found: invalid/model"
+  "type": "response",
+  "command": "set_model",
+  "success": false,
+  "error": "Model not found: invalid/model"
 }
 ```
 
@@ -1243,10 +1243,10 @@ Parse errors:
 
 ```json
 {
-    "type": "response",
-    "command": "parse",
-    "success": false,
-    "error": "Failed to parse command: Unexpected token..."
+  "type": "response",
+  "command": "parse",
+  "success": false,
+  "error": "Failed to parse command: Unexpected token..."
 }
 ```
 
@@ -1263,21 +1263,21 @@ Source files:
 
 ```json
 {
-    "id": "claude-sonnet-4-20250514",
-    "name": "Claude Sonnet 4",
-    "api": "anthropic-messages",
-    "provider": "anthropic",
-    "baseUrl": "https://api.anthropic.com",
-    "reasoning": true,
-    "input": ["text", "image"],
-    "contextWindow": 200000,
-    "maxTokens": 16384,
-    "cost": {
-        "input": 3.0,
-        "output": 15.0,
-        "cacheRead": 0.3,
-        "cacheWrite": 3.75
-    }
+  "id": "claude-sonnet-4-20250514",
+  "name": "Claude Sonnet 4",
+  "api": "anthropic-messages",
+  "provider": "anthropic",
+  "baseUrl": "https://api.anthropic.com",
+  "reasoning": true,
+  "input": ["text", "image"],
+  "contextWindow": 200000,
+  "maxTokens": 16384,
+  "cost": {
+    "input": 3.0,
+    "output": 15.0,
+    "cacheRead": 0.3,
+    "cacheWrite": 3.75
+  }
 }
 ```
 
@@ -1285,10 +1285,10 @@ Source files:
 
 ```json
 {
-    "role": "user",
-    "content": "Hello!",
-    "timestamp": 1733234567890,
-    "attachments": []
+  "role": "user",
+  "content": "Hello!",
+  "timestamp": 1733234567890,
+  "attachments": []
 }
 ```
 
@@ -1298,35 +1298,35 @@ The `content` field can be a string or an array of `TextContent`/`ImageContent` 
 
 ```json
 {
-    "role": "assistant",
-    "content": [
-        { "type": "text", "text": "Hello! How can I help?" },
-        { "type": "thinking", "thinking": "User is greeting me..." },
-        {
-            "type": "toolCall",
-            "id": "call_123",
-            "name": "bash",
-            "arguments": { "command": "ls" }
-        }
-    ],
-    "api": "anthropic-messages",
-    "provider": "anthropic",
-    "model": "claude-sonnet-4-20250514",
-    "usage": {
-        "input": 100,
-        "output": 50,
-        "cacheRead": 0,
-        "cacheWrite": 0,
-        "cost": {
-            "input": 0.0003,
-            "output": 0.00075,
-            "cacheRead": 0,
-            "cacheWrite": 0,
-            "total": 0.00105
-        }
-    },
-    "stopReason": "stop",
-    "timestamp": 1733234567890
+  "role": "assistant",
+  "content": [
+    { "type": "text", "text": "Hello! How can I help?" },
+    { "type": "thinking", "thinking": "User is greeting me..." },
+    {
+      "type": "toolCall",
+      "id": "call_123",
+      "name": "bash",
+      "arguments": { "command": "ls" }
+    }
+  ],
+  "api": "anthropic-messages",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-20250514",
+  "usage": {
+    "input": 100,
+    "output": 50,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "cost": {
+      "input": 0.0003,
+      "output": 0.00075,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "total": 0.00105
+    }
+  },
+  "stopReason": "stop",
+  "timestamp": 1733234567890
 }
 ```
 
@@ -1336,12 +1336,12 @@ Stop reasons: `"stop"`, `"length"`, `"toolUse"`, `"error"`, `"aborted"`
 
 ```json
 {
-    "role": "toolResult",
-    "toolCallId": "call_123",
-    "toolName": "bash",
-    "content": [{ "type": "text", "text": "total 48\ndrwxr-xr-x ..." }],
-    "isError": false,
-    "timestamp": 1733234567890
+  "role": "toolResult",
+  "toolCallId": "call_123",
+  "toolName": "bash",
+  "content": [{ "type": "text", "text": "total 48\ndrwxr-xr-x ..." }],
+  "isError": false,
+  "timestamp": 1733234567890
 }
 ```
 
@@ -1351,14 +1351,14 @@ Created by the `bash` RPC command (not by LLM tool calls):
 
 ```json
 {
-    "role": "bashExecution",
-    "command": "ls -la",
-    "output": "total 48\ndrwxr-xr-x ...",
-    "exitCode": 0,
-    "cancelled": false,
-    "truncated": false,
-    "fullOutputPath": null,
-    "timestamp": 1733234567890
+  "role": "bashExecution",
+  "command": "ls -la",
+  "output": "total 48\ndrwxr-xr-x ...",
+  "exitCode": 0,
+  "cancelled": false,
+  "truncated": false,
+  "fullOutputPath": null,
+  "timestamp": 1733234567890
 }
 ```
 
@@ -1366,14 +1366,14 @@ Created by the `bash` RPC command (not by LLM tool calls):
 
 ```json
 {
-    "id": "img1",
-    "type": "image",
-    "fileName": "photo.jpg",
-    "mimeType": "image/jpeg",
-    "size": 102400,
-    "content": "base64-encoded-data...",
-    "extractedText": null,
-    "preview": null
+  "id": "img1",
+  "type": "image",
+  "fileName": "photo.jpg",
+  "mimeType": "image/jpeg",
+  "size": 102400,
+  "content": "base64-encoded-data...",
+  "extractedText": null,
+  "preview": null
 }
 ```
 
@@ -1426,14 +1426,14 @@ const readline = require("readline");
 const agent = spawn("pi", ["--mode", "rpc", "--no-session"]);
 
 readline.createInterface({ input: agent.stdout }).on("line", (line) => {
-    const event = JSON.parse(line);
+  const event = JSON.parse(line);
 
-    if (event.type === "message_update") {
-        const { assistantMessageEvent } = event;
-        if (assistantMessageEvent.type === "text_delta") {
-            process.stdout.write(assistantMessageEvent.delta);
-        }
+  if (event.type === "message_update") {
+    const { assistantMessageEvent } = event;
+    if (assistantMessageEvent.type === "text_delta") {
+      process.stdout.write(assistantMessageEvent.delta);
     }
+  }
 });
 
 // Send prompt
@@ -1441,6 +1441,6 @@ agent.stdin.write(JSON.stringify({ type: "prompt", message: "Hello" }) + "\n");
 
 // Abort on Ctrl+C
 process.on("SIGINT", () => {
-    agent.stdin.write(JSON.stringify({ type: "abort" }) + "\n");
+  agent.stdin.write(JSON.stringify({ type: "abort" }) + "\n");
 });
 ```
