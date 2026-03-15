@@ -17,7 +17,6 @@ class AiModelSettings {
   final Map<String, String> providerNames;
 
   /// Which thinking levels to show in the picker.
-  /// Defaults to all four; Claude Code omits 'off'.
   final List<String> supportedThinkingLevels;
 
   const AiModelSettings({
@@ -28,7 +27,7 @@ class AiModelSettings {
     required this.thinkingLevel,
     required this.providerKey,
     required this.providerNames,
-    this.supportedThinkingLevels = const ['off', 'low', 'medium', 'high'],
+    required this.supportedThinkingLevels,
   });
 }
 
@@ -42,19 +41,21 @@ class AiPromptPopup extends StatefulWidget {
   final String? Function(String currentText)? onHistoryUp;
 
   /// Called when the user presses Down on the last line of the prompt field.
+  /// Receives the current field text; returns the text to show, or null to
+  /// let the TextField handle the key normally.
   final String? Function(String currentText)? onHistoryDown;
 
-  /// Current model/thinking state. When non-null the footer toolbar is shown.
-  final AiModelSettings? modelSettings;
+  /// Current model/thinking state shown in the footer toolbar.
+  final AiModelSettings modelSettings;
 
   /// Called when the user picks a different model.
-  final void Function(String provider, String modelId)? onModelChanged;
+  final void Function(String provider, String modelId) onModelChanged;
 
   /// Called when the user picks a different thinking level.
-  final void Function(String level)? onThinkingLevelChanged;
+  final void Function(String level) onThinkingLevelChanged;
 
   /// Called when the user picks a different AI provider.
-  final void Function(String providerKey)? onProviderChanged;
+  final void Function(String providerKey) onProviderChanged;
 
   const AiPromptPopup({
     super.key,
@@ -62,10 +63,10 @@ class AiPromptPopup extends StatefulWidget {
     required this.onSubmit,
     this.onHistoryUp,
     this.onHistoryDown,
-    this.modelSettings,
-    this.onModelChanged,
-    this.onThinkingLevelChanged,
-    this.onProviderChanged,
+    required this.modelSettings,
+    required this.onModelChanged,
+    required this.onThinkingLevelChanged,
+    required this.onProviderChanged,
   });
 
   @override
@@ -120,9 +121,7 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final settings = widget.modelSettings;
-    final effectiveModel = settings == null
-        ? null
-        : _effectiveModelForUi(settings);
+    final effectiveModel = _effectiveModelForUi(settings);
     final modelSupportsThinking = effectiveModel?['reasoning'] == true;
 
     return Shortcuts(
@@ -209,16 +208,15 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                         // Ctrl+P — cycle model forward.
                         if (event.logicalKey == LogicalKeyboardKey.keyP &&
                             HardwareKeyboard.instance.isControlPressed) {
-                          final s = widget.modelSettings;
-                          final models = s?.availableModels ?? const [];
-                          if (s != null && models.isNotEmpty) {
-                            final current = _effectiveModelForUi(s);
+                          final models = settings.availableModels;
+                          if (models.isNotEmpty) {
+                            final current = _effectiveModelForUi(settings);
                             final cur = current == null
                                 ? -1
                                 : models.indexOf(current);
                             final next = (cur + 1) % models.length;
                             final m = models[next];
-                            widget.onModelChanged?.call(
+                            widget.onModelChanged(
                               m['provider'] as String,
                               m['id'] as String,
                             );
@@ -229,14 +227,12 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                         // Ctrl+Tab — cycle provider forward.
                         if (event.logicalKey == LogicalKeyboardKey.tab &&
                             HardwareKeyboard.instance.isControlPressed) {
-                          final names = settings?.providerNames ?? const {};
+                          final names = settings.providerNames;
                           if (names.length > 1) {
                             final keys = names.keys.toList();
-                            final cur = keys.indexOf(
-                              settings?.providerKey ?? keys.first,
-                            );
+                            final cur = keys.indexOf(settings.providerKey);
                             final next = (cur + 1) % keys.length;
-                            widget.onProviderChanged?.call(keys[next]);
+                            widget.onProviderChanged(keys[next]);
                           }
                           return KeyEventResult.handled;
                         }
@@ -246,14 +242,10 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                         if (event.logicalKey == LogicalKeyboardKey.tab &&
                             HardwareKeyboard.instance.isShiftPressed &&
                             modelSupportsThinking) {
-                          final levels =
-                              settings?.supportedThinkingLevels ??
-                              const ['off', 'low', 'medium', 'high'];
-                          final cur = levels.indexOf(
-                            widget.modelSettings?.thinkingLevel ?? levels.first,
-                          );
+                          final levels = settings.supportedThinkingLevels;
+                          final cur = levels.indexOf(settings.thinkingLevel);
                           final next = (cur + 1) % levels.length;
-                          widget.onThinkingLevelChanged?.call(levels[next]);
+                          widget.onThinkingLevelChanged(levels[next]);
                           return KeyEventResult.handled;
                         }
 
@@ -293,36 +285,34 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                     ),
 
                     // ── Provider / model / thinking footer ────────────────────
-                    if (settings != null) ...[
-                      const Divider(height: 1),
-                      SizedBox(
-                        height: 32,
-                        child: Row(
-                          children: [
-                            if (settings.providerNames.length > 1)
-                              _ProviderPicker(
-                                providerKey: settings.providerKey,
-                                providerNames: settings.providerNames,
-                                onChanged: widget.onProviderChanged,
-                                onFocusBack: _textFieldFocusNode.requestFocus,
-                              ),
-                            _ModelPicker(
-                              settings: settings,
-                              onChanged: widget.onModelChanged,
+                    const Divider(height: 1),
+                    SizedBox(
+                      height: 32,
+                      child: Row(
+                        children: [
+                          if (settings.providerNames.length > 1)
+                            _ProviderPicker(
+                              providerKey: settings.providerKey,
+                              providerNames: settings.providerNames,
+                              onChanged: widget.onProviderChanged,
                               onFocusBack: _textFieldFocusNode.requestFocus,
                             ),
-                            const Spacer(),
-                            if (modelSupportsThinking)
-                              _ThinkingPicker(
-                                level: settings.thinkingLevel,
-                                levels: settings.supportedThinkingLevels,
-                                onChanged: widget.onThinkingLevelChanged,
-                                onFocusBack: _textFieldFocusNode.requestFocus,
-                              ),
-                          ],
-                        ),
+                          _ModelPicker(
+                            settings: settings,
+                            onChanged: widget.onModelChanged,
+                            onFocusBack: _textFieldFocusNode.requestFocus,
+                          ),
+                          const Spacer(),
+                          if (modelSupportsThinking)
+                            _ThinkingPicker(
+                              level: settings.thinkingLevel,
+                              levels: settings.supportedThinkingLevels,
+                              onChanged: widget.onThinkingLevelChanged,
+                              onFocusBack: _textFieldFocusNode.requestFocus,
+                            ),
+                        ],
                       ),
-                    ],
+                    ),
                   ],
                 ),
               ),
@@ -367,12 +357,12 @@ Map<String, dynamic>? _effectiveModelForUi(AiModelSettings settings) {
 class _ModelPicker extends StatelessWidget {
   const _ModelPicker({
     required this.settings,
-    this.onChanged,
+    required this.onChanged,
     this.onFocusBack,
   });
 
   final AiModelSettings settings;
-  final void Function(String provider, String modelId)? onChanged;
+  final void Function(String provider, String modelId) onChanged;
   final VoidCallback? onFocusBack;
 
   @override
@@ -414,7 +404,7 @@ class _ModelPicker extends StatelessWidget {
         final m = settings.availableModels.firstWhere(
           (m) => _modelKey(m) == key,
         );
-        onChanged?.call(m['provider'] as String, m['id'] as String);
+        onChanged(m['provider'] as String, m['id'] as String);
         onFocusBack?.call();
       },
     );
@@ -425,13 +415,13 @@ class _ProviderPicker extends StatelessWidget {
   const _ProviderPicker({
     required this.providerKey,
     required this.providerNames,
-    this.onChanged,
+    required this.onChanged,
     this.onFocusBack,
   });
 
   final String providerKey;
   final Map<String, String> providerNames;
-  final void Function(String key)? onChanged;
+  final void Function(String key) onChanged;
   final VoidCallback? onFocusBack;
 
   @override
@@ -452,7 +442,7 @@ class _ProviderPicker extends StatelessWidget {
           return DropdownMenuItem<String>(value: e.key, child: Text(e.value));
         }).toList(),
         onChanged: (key) {
-          if (key != null) onChanged?.call(key);
+          if (key != null) onChanged(key);
           onFocusBack?.call();
         },
       ),
@@ -464,13 +454,13 @@ class _ThinkingPicker extends StatelessWidget {
   const _ThinkingPicker({
     required this.level,
     required this.levels,
-    this.onChanged,
+    required this.onChanged,
     this.onFocusBack,
   });
 
   final String level;
   final List<String> levels;
-  final void Function(String level)? onChanged;
+  final void Function(String level) onChanged;
   final VoidCallback? onFocusBack;
 
   static const _labels = {
@@ -494,7 +484,7 @@ class _ThinkingPicker extends StatelessWidget {
         return DropdownMenuItem<String>(value: l, child: Text(_labels[l] ?? l));
       }).toList(),
       onChanged: (v) {
-        onChanged?.call(v ?? effectiveLevel);
+        onChanged(v ?? effectiveLevel);
         onFocusBack?.call();
       },
     );
