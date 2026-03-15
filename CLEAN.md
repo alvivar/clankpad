@@ -92,32 +92,38 @@ These are not dead in the abstract, but they are unused by the current app becau
 
 ## Batch 3 — Remove backward-compatibility code if old session support is no longer needed
 
-Only do this if you are okay dropping support for older persisted session formats.
+**Status:** done
+
+This batch drops support for older persisted session formats.
 
 ### 6. Remove legacy session migration fields
 
+- **Status:** done
 - **File:** `lib/state/editor_state.dart`
-- **Remove migration support for:**
+- **Removed migration support for:**
   - `lastModelProvider`
   - `lastModelId`
   - `lastThinkingLevel`
-- **Why:** current session writes use `providerPrefs`; these old flat keys are only read for migration.
+- **Why:** current session writes use `providerPrefs`; these old flat keys were only read for migration.
 - **Risk:** medium
 - **Effect:** users with very old `session.json` files may lose restored AI model preferences once.
 
 ### 7. Remove model-id-only fallback in popup selection logic
 
+- **Status:** done
 - **File:** `lib/widgets/ai_prompt_popup.dart`
 - **Function:** `_effectiveModelForUi()`
-- **Remove:** fallback that matches only by `id` when `selectedProvider` is missing
-- **Why:** current app tracks provider + model together; this branch exists only for older state.
+- **Removed:** fallback that matched only by `id` when `selectedProvider` was missing
+- **Why:** current app tracks provider + model together; this branch existed only for older state.
 - **Risk:** medium
 
 ### Validation for Batch 3
 
-- test with a fresh session
-- optionally delete `%APPDATA%\Clankpad\session.json` first
-- verify provider/model/thinking persistence still works with the new format
+- `flutter analyze` ✅
+- manual runtime checks still recommended:
+  - test with a fresh session
+  - optionally delete `%APPDATA%\Clankpad\session.json` first
+  - verify provider/model/thinking persistence still works with the new format
 
 ---
 

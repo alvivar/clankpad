@@ -208,28 +208,12 @@ class EditorState extends ChangeNotifier {
 
     lastProviderKey = json['lastProviderKey'] as String?;
 
-    // Restore per-provider prefs. Supports both the new 'providerPrefs' map
-    // and the legacy flat fields (lastModelProvider, etc.) for migration.
+    // Restore per-provider prefs from the current session format.
     final prefsJson = json['providerPrefs'] as Map<String, dynamic>?;
     if (prefsJson != null) {
       providerPrefs = prefsJson.map(
         (k, v) => MapEntry(k, Map<String, String>.from(v as Map)),
       );
-    } else {
-      // Migrate legacy flat fields into providerPrefs under the last provider.
-      final legacyKey = lastProviderKey ?? 'pi';
-      final legacyProvider = json['lastModelProvider'] as String?;
-      final legacyModelId = json['lastModelId'] as String?;
-      final legacyThinking = json['lastThinkingLevel'] as String?;
-      if (legacyProvider != null ||
-          legacyModelId != null ||
-          legacyThinking != null) {
-        final prefs = <String, String>{};
-        if (legacyProvider != null) prefs['modelProvider'] = legacyProvider;
-        if (legacyModelId != null) prefs['modelId'] = legacyModelId;
-        if (legacyThinking != null) prefs['thinkingLevel'] = legacyThinking;
-        providerPrefs[legacyKey] = prefs;
-      }
     }
 
     // Dispose the initial tab created by the constructor.

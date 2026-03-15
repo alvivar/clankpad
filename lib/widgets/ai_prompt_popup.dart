@@ -333,21 +333,15 @@ Map<String, dynamic>? _effectiveModelForUi(AiModelSettings settings) {
   if (settings.availableModels.isEmpty) return null;
 
   // No explicit selection yet: mirror the dropdown's visible fallback.
-  if (settings.selectedModelId == null) return settings.availableModels.first;
-
-  // Prefer exact provider+id match when provider is known.
-  if (settings.selectedProvider != null) {
-    for (final m in settings.availableModels) {
-      if (m['provider'] == settings.selectedProvider &&
-          m['id'] == settings.selectedModelId) {
-        return m;
-      }
-    }
+  if (settings.selectedProvider == null || settings.selectedModelId == null) {
+    return settings.availableModels.first;
   }
 
-  // Back-compat fallback for older state that tracked only id.
   for (final m in settings.availableModels) {
-    if (m['id'] == settings.selectedModelId) return m;
+    if (m['provider'] == settings.selectedProvider &&
+        m['id'] == settings.selectedModelId) {
+      return m;
+    }
   }
 
   // If selected model is missing from the filtered list, fall back to first.
