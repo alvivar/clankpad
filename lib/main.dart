@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -32,6 +33,11 @@ class ClankpadApp extends StatefulWidget {
 class _ClankpadAppState extends State<ClankpadApp> {
   late final SessionService _sessionService;
   late final AppLifecycleListener _lifecycleListener;
+
+  Future<void> _exitApplication() async {
+    _sessionService.flushSync();
+    exit(0);
+  }
 
   @override
   void initState() {
@@ -80,7 +86,10 @@ class _ClankpadAppState extends State<ClankpadApp> {
         ),
         useMaterial3: true,
       ),
-      home: EditorScreen(editorState: widget.editorState),
+      home: EditorScreen(
+        editorState: widget.editorState,
+        onExitRequested: _exitApplication,
+      ),
     );
   }
 }

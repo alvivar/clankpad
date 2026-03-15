@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:ui' as ui;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -19,8 +18,13 @@ import '../widgets/find_bar.dart';
 
 class EditorScreen extends StatefulWidget {
   final EditorState editorState;
+  final Future<void> Function() onExitRequested;
 
-  const EditorScreen({super.key, required this.editorState});
+  const EditorScreen({
+    super.key,
+    required this.editorState,
+    required this.onExitRequested,
+  });
 
   @override
   State<EditorScreen> createState() => _EditorScreenState();
@@ -897,9 +901,7 @@ class _EditorScreenState extends State<EditorScreen> {
       }
 
       if (_shouldExitOnCloseTab(index)) {
-        await ServicesBinding.instance.exitApplication(
-          ui.AppExitType.cancelable,
-        );
+        widget.onExitRequested();
         return;
       }
 
