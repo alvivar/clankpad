@@ -21,6 +21,7 @@ This document describes the current behavior and structure of the implementation
   - 2.6 Session persistence (hot exit)
   - 2.7 Find (Ctrl+F)
   - 2.8 Inline AI edit (Ctrl+K)
+  - 2.9 Markdown preview (Ctrl+M)
 - 3. Data formats
   - 3.1 Session file location
   - 3.2 `session.json` structure and semantics
@@ -56,6 +57,7 @@ Out of scope in the current implementation:
 - Menu bar (File menu)
 - Font size UI
 - Native per-selection popup positioning (the AI popup is always top-center)
+- Live-updating Markdown preview (preview is a static snapshot)
 
 ---
 
@@ -65,9 +67,9 @@ Out of scope in the current implementation:
 
 The UI is one screen:
 
-- A horizontally scrollable tab bar at the top.
+- A horizontally scrollable tab bar at the top, with a Markdown preview toggle button (eye icon) and a `+` (new tab) button on the right.
 - Below it, optional transient bars (error banner, AI progress + cancel row, find bar).
-- The editor area fills the rest of the window.
+- The editor area fills the rest of the window. In Markdown preview mode, the editor is replaced by a rendered Markdown view.
 - AI popup and diff UI render as overlays at the top-center of the editor area.
 - On startup, window size is set to `80%` width × `90%` height of the current platform work area and centered.
   - Windows: primary monitor `rcWork` (taskbar excluded).
@@ -158,6 +160,7 @@ This is the canonical shortcut list for the current implementation.
 | `Ctrl+K`       | Open the AI prompt popup                                                 |
 | `Alt+↑`        | Move line/block up                                                       |
 | `Alt+↓`        | Move line/block down                                                     |
+| `Ctrl+M`       | Toggle Markdown preview                                                  |
 | `Escape`       | Cancel in-flight AI request **only while loading and before diff opens** |
 
 #### Editor text shortcuts (while editor has focus)
@@ -185,6 +188,7 @@ This is the canonical shortcut list for the current implementation.
 | `↑` / `↓`     | Prompt history navigation (only when caret is on first/last line)         |
 | `Ctrl+P`      | Cycle model forward (if model list is loaded)                             |
 | `Shift+Tab`   | Cycle thinking level forward (only if effective model supports reasoning) |
+| `Ctrl+Tab`    | Cycle AI provider forward (only if more than one provider is registered)  |
 
 While the AI prompt popup is open, app-level shortcuts like `Ctrl+N`, `Ctrl+W`, `Ctrl+O`, `Ctrl+S`, `Ctrl+K`, `Ctrl+F` are blocked from reaching the root shortcut layer.
 
@@ -374,6 +378,32 @@ Reject:
 
 If Pi completes without emitting any `text_delta` chunks, Clankpad still opens the diff view with an empty proposed result so the user can explicitly accept or reject.
 
+### 2.9 Markdown preview (Ctrl+M)
+
+Clankpad can render the active tab's content as formatted Markdown.
+
+**Toggle**
+
+- `Ctrl+M` or the preview button (eye icon) in the tab bar toggles between edit mode and preview mode.
+- The preview button sits in the tab bar, right side, between the tab list and the `+` (new tab) button.
+- The button icon reflects the current state: `visibility` (eye) when preview is off, `visibility_off` when preview is on.
+
+**Preview mode**
+
+- The editor area is replaced by a read-only, scrollable Markdown render of the active tab's text.
+- The rendered view uses the `flutter_markdown_plus` package (`MarkdownBody` widget).
+- The preview reflects the tab's content at the moment preview was toggled; it is static (not live-updating while in preview mode).
+- All editing shortcuts (`Tab`, `Shift+Tab`, `Alt+↑/↓`, text input) are inert while preview is active — the editor is not mounted.
+
+**Blocked during AI**
+
+- `Ctrl+M` is blocked while the AI prompt, streaming, or diff view is active.
+
+**Interaction with other features**
+
+- Switching tabs while preview is on turns preview off (returns to edit mode).
+- The find bar (`Ctrl+F`) is independent of preview; opening find closes preview.
+
 ---
 
 ## 3. Data formats
@@ -458,10 +488,10 @@ Clankpad supports multiple AI backends through the `AiProvider` abstraction (`li
 
 ### Registered providers
 
-| Key            | Class                | Backend                                      |
-| -------------- | -------------------- | -------------------------------------------- |
-| `pi`           | `PiProvider`         | Pi RPC subprocess (`pi --mode rpc`)          |
-| `claude_code`  | `ClaudeCodeProvider` | Claude Code CLI (`claude -p --output-format stream-json`) |
+| Key           | Class                | Backend                                                   |
+| ------------- | -------------------- | --------------------------------------------------------- |
+| `pi`          | `PiProvider`         | Pi RPC subprocess (`pi --mode rpc`)                       |
+| `claude_code` | `ClaudeCodeProvider` | Claude Code CLI (`claude -p --output-format stream-json`) |
 
 The user selects the active provider from a dropdown in the Ctrl+K popup footer. The choice persists across sessions via `lastProviderKey` in `session.json`. If the persisted provider is unavailable on restart, Clankpad falls back to `pi`.
 
@@ -593,13 +623,13 @@ Claude Code (`claude -p`) is an alternative AI backend. Unlike Pi, it uses a **o
 
 #### Differences from Pi
 
-| Aspect           | Pi                               | Claude Code                        |
-| ---------------- | -------------------------------- | ---------------------------------- |
-| Lifecycle        | Long-lived warm process          | One-shot per request               |
-| Model list       | `get_available_models` RPC       | Not queryable; empty model picker  |
-| Model switching  | `set_model` RPC command          | `--model` CLI flag                 |
-| Thinking level   | `set_thinking_level` RPC command | Not supported via CLI              |
-| Abort            | `{"type":"abort"}` on stdin      | Kill process                       |
+| Aspect          | Pi                               | Claude Code                       |
+| --------------- | -------------------------------- | --------------------------------- |
+| Lifecycle       | Long-lived warm process          | One-shot per request              |
+| Model list      | `get_available_models` RPC       | Not queryable; empty model picker |
+| Model switching | `set_model` RPC command          | `--model` CLI flag                |
+| Thinking level  | `set_thinking_level` RPC command | Not supported via CLI             |
+| Abort           | `{"type":"abort"}` on stdin      | Kill process                      |
 
 ---
 
@@ -1736,11 +1766,12 @@ Cycle order: `off → low → medium → high → off → …`
 
 ## Appendix G — Dependencies
 
-Only one external package is used. Everything else relies on the Flutter/Dart standard library.
+Two external packages are used. Everything else relies on the Flutter/Dart standard library.
 
-| Package         | Purpose                       | Why not stdlib?                                                           |
-| --------------- | ----------------------------- | ------------------------------------------------------------------------- |
-| `file_selector` | Native open/save file dialogs | Requires OS-level calls (Windows COM API); no built-in Flutter equivalent |
+| Package                 | Purpose                       | Why not stdlib?                                                           |
+| ----------------------- | ----------------------------- | ------------------------------------------------------------------------- |
+| `file_selector`         | Native open/save file dialogs | Requires OS-level calls (Windows COM API); no built-in Flutter equivalent |
+| `flutter_markdown_plus` | Markdown rendering            | Markdown parsing + widget rendering is too complex to reimplement inline  |
 
 **Stdlib replacements:**
 
