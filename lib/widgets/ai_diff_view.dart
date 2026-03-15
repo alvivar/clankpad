@@ -16,6 +16,7 @@ import '../models/intents.dart';
 class AiDiffView extends StatelessWidget {
   final String editTarget;
   final String proposed;
+  final bool isStreaming;
   final VoidCallback onAccept;
   final VoidCallback onReject;
   // Owned by EditorScreen so focus can be driven externally.
@@ -25,6 +26,7 @@ class AiDiffView extends StatelessWidget {
     super.key,
     required this.editTarget,
     required this.proposed,
+    required this.isStreaming,
     required this.onAccept,
     required this.onReject,
     required this.focusNode,
@@ -80,6 +82,7 @@ class AiDiffView extends StatelessWidget {
                 child: _DiffCard(
                   editTarget: editTarget,
                   proposed: proposed,
+                  isStreaming: isStreaming,
                   onAccept: onAccept,
                   onReject: onReject,
                 ),
@@ -97,12 +100,14 @@ class AiDiffView extends StatelessWidget {
 class _DiffCard extends StatelessWidget {
   final String editTarget;
   final String proposed;
+  final bool isStreaming;
   final VoidCallback onAccept;
   final VoidCallback onReject;
 
   const _DiffCard({
     required this.editTarget,
     required this.proposed,
+    required this.isStreaming,
     required this.onAccept,
     required this.onReject,
   });
@@ -122,13 +127,19 @@ class _DiffCard extends StatelessWidget {
           // Header
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: Text(
-              'Proposed AI edit',
-              style: TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 13,
-                color: colorScheme.onSurface,
-              ),
+            child: Row(
+              children: [
+                Text(
+                  'Proposed AI edit',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+                const Spacer(),
+                _StatusChip(isStreaming: isStreaming),
+              ],
             ),
           ),
 
@@ -219,6 +230,39 @@ class _DiffCard extends StatelessWidget {
     return brightness == Brightness.dark
         ? const Color(0xFF81C784) // Material green 300
         : const Color(0xFF388E3C); // Material green 700
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  final bool isStreaming;
+
+  const _StatusChip({required this.isStreaming});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final fg = isStreaming ? colorScheme.primary : colorScheme.secondary;
+    final bg = isStreaming
+        ? colorScheme.primaryContainer.withValues(alpha: 0.6)
+        : colorScheme.secondaryContainer.withValues(alpha: 0.6);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Text(
+          isStreaming ? 'Generating…' : 'Complete',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: fg,
+          ),
+        ),
+      ),
+    );
   }
 }
 

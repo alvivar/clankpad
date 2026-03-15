@@ -42,6 +42,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // Diff view state — populated as chunks arrive from the AI stream.
   bool _diffVisible = false;
+  bool _aiStreaming = false;
   String _diffEditTarget = '';
   String _diffProposed = '';
 
@@ -712,6 +713,7 @@ class _EditorScreenState extends State<EditorScreen> {
       _aiPromptVisible = false;
       _editorReadOnly =
           true; // locked until diff is accepted/rejected/cancelled
+      _aiStreaming = true;
       _diffProposed = '';
       _errorBanner = null; // clear any previous error
     });
@@ -764,6 +766,10 @@ class _EditorScreenState extends State<EditorScreen> {
         });
       }
 
+      if (mounted) {
+        setState(() => _aiStreaming = false);
+      }
+
       // Stream completed normally. Surface a non-fatal model-switch warning
       // if Pi rejected set_model / set_thinking_level (prompt still ran).
       final switchErr = _activeProvider.lastWarning;
@@ -781,8 +787,13 @@ class _EditorScreenState extends State<EditorScreen> {
       // If the diff is visible the editor was already locked; it stays locked
       // until the user accepts/rejects, so we only clear it here when the
       // diff did not open (error or pre-diff cancel).
-      if (mounted && !_diffVisible) {
-        setState(() => _editorReadOnly = false);
+      if (mounted) {
+        setState(() {
+          _aiStreaming = false;
+          if (!_diffVisible) {
+            _editorReadOnly = false;
+          }
+        });
       }
     }
   }
@@ -791,7 +802,10 @@ class _EditorScreenState extends State<EditorScreen> {
   /// Only valid while the loading state is active (before the diff opens).
   void _cancelAiRequest() {
     _activeProvider.abort();
-    setState(() => _editorReadOnly = false);
+    setState(() {
+      _aiStreaming = false;
+      _editorReadOnly = false;
+    });
   }
 
   // ── Diff accept / reject ─────────────────────────────────────────────────────
@@ -828,6 +842,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
     setState(() {
       _diffVisible = false;
+      _aiStreaming = false;
       _editorReadOnly = false;
     });
     // See _dismissAiPrompt: synchronous requestFocus() is safe here because
@@ -844,6 +859,7 @@ class _EditorScreenState extends State<EditorScreen> {
     // Text is unchanged — no controller update needed.
     setState(() {
       _diffVisible = false;
+      _aiStreaming = false;
       _editorReadOnly = false;
     });
     // See _dismissAiPrompt: synchronous requestFocus() is safe here because
@@ -1159,6 +1175,7 @@ class _EditorScreenState extends State<EditorScreen> {
                         focusNode: _diffFocusNode,
                         editTarget: _diffEditTarget,
                         proposed: _diffProposed,
+                        isStreaming: _aiStreaming,
                         onAccept: _acceptDiff,
                         onReject: _rejectDiff,
                       ),
