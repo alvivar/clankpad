@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -852,6 +853,12 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // ── Tab close ────────────────────────────────────────────────────────────────
 
+  bool _shouldExitOnCloseTab(int index) {
+    if (_state.tabs.length != 1) return false;
+    final tab = _state.tabs[index];
+    return tab.filePath == null && tab.controller.text.isEmpty && !tab.isDirty;
+  }
+
   Future<void> _handleCloseTab(int index) async {
     if (_closingTab) return;
     _closingTab = true;
@@ -871,6 +878,13 @@ class _EditorScreenState extends State<EditorScreen> {
           case _DirtyChoice.dontSave:
             break;
         }
+      }
+
+      if (_shouldExitOnCloseTab(index)) {
+        await ServicesBinding.instance.exitApplication(
+          ui.AppExitType.cancelable,
+        );
+        return;
       }
 
       _state.forceCloseTab(index);
