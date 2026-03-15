@@ -122,7 +122,7 @@ class _EditorScreenState extends State<EditorScreen> {
   /// True during every AI phase: prompt open, streaming, and diff visible.
   /// Used to guard structural actions (new/close/open/switch) that would
   /// invalidate the snapshot or apply the diff to the wrong tab.
-  bool get _aiActive => _aiPromptVisible || _editorReadOnly || _diffVisible;
+  bool get _aiActive => _aiPromptVisible || _editorReadOnly;
 
   // ── Paragraph helper ─────────────────────────────────────────────────────────
 

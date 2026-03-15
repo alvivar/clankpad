@@ -18,13 +18,12 @@ class ClaudeCodeProvider implements AiProvider {
 
   Process? _activeProcess;
   bool _aborted = false;
-  String? _lastWarning;
 
   @override
   String get name => 'Claude Code';
 
   @override
-  String? get lastWarning => _lastWarning;
+  String? get lastWarning => null;
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -70,7 +69,6 @@ class ClaudeCodeProvider implements AiProvider {
     String thinkingLevel = 'off',
     int? insertOffset,
   }) async* {
-    _lastWarning = null;
     _aborted = false;
 
     final prompt = AiProvider.buildPromptMessage(

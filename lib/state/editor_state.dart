@@ -254,10 +254,6 @@ class EditorState extends ChangeNotifier {
     // Post-restore fixup 2: clamp activeTabIndex after min-1 is guaranteed.
     _activeTabIndex = storedActiveIndex.clamp(0, _tabs.length - 1);
 
-    // notifyListeners here is a no-op (no listeners yet), but is correct to
-    // call for completeness in case the restore happens to have listeners.
-    notifyListeners();
-
     _startupNotices
       ..clear()
       ..addAll(notices);
