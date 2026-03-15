@@ -1,274 +1,640 @@
-# Clankpad — Code Review
+# Clankpad — Application Review
 
-**Scope:** all 15 Dart files in `lib/` (~4,100 lines) + `SPEC.md`.
-**Focus:** simplicity (top priority), performance, idiomatic Dart/Flutter, organization.
+**Reviewed:** full Flutter application codebase
+
+- `lib/` application code
+- `pubspec.yaml`
+- `analysis_options.yaml`
+- platform runner shells (`windows/`, `linux/`, `macos/`)
+- docs/spec context (`SPEC.md`)
+
+**Priority:** simplicity first, performance second, then organization / idiomatic Dart & Flutter.
+
+**Current status:** `flutter analyze` passes with **no issues**.
 
 ---
 
-## Overall verdict
+## Executive summary
 
-**Solid project — above average for its size.** The architecture is deliberately flat, state boundaries are well-chosen, dependency footprint is minimal (`file_selector` only), and `flutter analyze` is clean.
+This is a **good, intentionally simple Flutter desktop app**.
 
-The codebase has two kinds of issues: a few correctness/performance gaps that matter, and a set of idiomatic Dart/Flutter roughnesses that don't block users but make the code harder to maintain. Both are listed below, prioritized.
+The strongest parts of the codebase are:
+
+- very small dependency surface
+- sensible flat project structure
+- careful focus/keyboard handling for desktop
+- a good state split that avoids rebuilding the UI on every keystroke
+- minimal abstraction around AI providers without overengineering
+
+The main weaknesses are also clear:
+
+- one very large screen file (`EditorScreen`) owns too many responsibilities
+- AI model data is passed around as `Map<String, dynamic>` instead of a typed model
+- debounced session writes are synchronous on the UI isolate
+- there is no test suite yet
+
+Overall, the project already feels lean. The best improvements are the ones that **remove code and reduce moving parts**, not the ones that introduce more architecture.
 
 ---
 
-## 1 — Correctness
+## Overall assessment
 
-### 1.1 Models stored as `Map<String, dynamic>` instead of a typed class
+### What is already strong
 
-**Where:** `AiProvider.fetchModels`, `AiProviderModels.models`, `_availableModels`, `AiModelSettings.availableModels`, `_ModelPicker`, `_effectiveModelForUi`, `PiProvider`, `ClaudeCodeProvider._models`.
+### 1. Simplicity of architecture
 
-**Problem:** Model data flows through the entire app as `Map<String, dynamic>`. Every access site uses string-key lookups (`m['provider']`, `m['id']`, `m['reasoning']`, `m['name']`) with no compile-time safety. A typo in any key silently returns `null`. The `_effectiveModelForUi` helper, the keyboard-shortcut cycling logic, and `_ModelPicker` all repeat the same casts.
+The project structure is appropriate for the app size:
 
-**Why it matters for simplicity:** A typed `AiModel` class with 4 final fields _removes_ code — every `as String`, `as String?`, null check, and cast disappears, and the IDE catches typos. It's fewer tokens of source for the same features.
+- `models/`
+- `state/`
+- `services/`
+- `screens/`
+- `widgets/`
 
-**Fix:**
+That is about the right amount of separation. It avoids both extremes:
+
+- not everything is dumped into one file/folder
+- not every concept has its own pattern, layer, or package
+
+This is a **good small Flutter app structure**.
+
+### 2. Good performance-oriented state design
+
+The most important architectural decision in the app is a good one:
+
+- text edits do **not** trigger broad widget rebuilds
+- structural changes still use `notifyListeners()`
+- tab dirtiness is isolated with `ValueNotifier<bool>`
+- session persistence is triggered through a separate change channel
+
+That is a strong design for a text editor. It keeps typing performance safe without introducing state-management complexity.
+
+### 3. Good desktop UX discipline
+
+The code pays attention to desktop-specific issues that many Flutter apps ignore:
+
+- focus restoration
+- shortcut handling
+- preventing focus theft from icon buttons
+- modal overlay shortcut blocking
+- explicit tab-switch/editor-focus behavior
+
+This is one of the higher-quality aspects of the app.
+
+### 4. Very small dependency footprint
+
+`pubspec.yaml` is minimal:
+
+- Flutter SDK
+- `file_selector`
+- default lints
+
+That is excellent for long-term maintenance, startup time, and project clarity.
+
+---
+
+## Highest-priority findings
+
+These are the changes most worth making, in order.
+
+---
+
+## 1. Replace AI model `Map<String, dynamic>` data with a typed model
+
+**Priority:** very high
+**Why:** simplifies code and improves correctness
+**Files affected:**
+
+- `lib/services/ai_provider.dart`
+- `lib/services/pi_provider.dart`
+- `lib/services/claude_code_provider.dart`
+- `lib/screens/editor_screen.dart`
+- `lib/widgets/ai_prompt_popup.dart`
+
+### Problem
+
+AI model data is passed around as `List<Map<String, dynamic>>`.
+
+That creates repeated code like:
+
+- `m['provider']`
+- `m['id']`
+- `m['name']`
+- `m['reasoning'] == true`
+- many casts and null checks
+
+This is not just less type-safe; it also makes the code noisier than necessary.
+
+### Why this matters for simplicity
+
+A typed class is actually **simpler** than maps here. It removes:
+
+- string-key lookups
+- dynamic casting
+- repeated helper logic
+- accidental key typos
+
+### Recommendation
+
+Introduce a small immutable model, for example:
 
 ```dart
 class AiModel {
+  final String provider;
   final String id;
   final String name;
-  final String provider;
-  final bool reasoning;
-  const AiModel({required this.id, required this.name, required this.provider, this.reasoning = false});
+  final bool supportsReasoning;
+
+  const AiModel({
+    required this.provider,
+    required this.id,
+    required this.name,
+    this.supportsReasoning = false,
+  });
 }
 ```
 
-Then replace `List<Map<String, dynamic>>` → `List<AiModel>` everywhere. Estimated net line delta: **negative** (fewer lines total).
+Then replace `List<Map<String, dynamic>>` with `List<AiModel>` throughout.
+
+### Expected result
+
+- less code
+- safer refactors
+- clearer UI code
+- better IDE/autocomplete support
+
+This is the single best cleanup in the codebase because it improves both **simplicity** and **maintainability** without adding architecture.
 
 ---
 
-### 1.2 `_snapshotSelection` mutated after popup closes
+## 2. Make debounced session writes asynchronous
 
-**Where:** `_submitAiPrompt` (editor_screen.dart, paragraph auto-expand block).
+**Priority:** very high
+**Why:** protects UI responsiveness
+**File:** `lib/services/session_service.dart`
 
-**Problem:** `_snapshotSelection` is a field on `_EditorScreenState`. It's captured in `_openAiPrompt` and then _reassigned_ inside `_submitAiPrompt` (the paragraph expansion). This is fine today because the field is only read later in the same method and in `_acceptDiff`. But if any future code path reads `_snapshotSelection` between `_openAiPrompt` and `_submitAiPrompt`, it sees stale data. The paragraph expansion should produce a local variable, not mutate the snapshot field.
+### Problem
 
-**Fix:** Make the expanded selection a local in `_submitAiPrompt` and pass it through, or expand at snapshot time in `_openAiPrompt` (the highlight code already does this).
+The debounced save path uses synchronous file I/O:
+
+- `writeAsStringSync`
+- `renameSync`
+
+This work happens on the main isolate.
+
+For small sessions this is usually fine, but a text editor can easily end up with:
+
+- multiple tabs
+- large documents
+- frequent edits
+
+That means periodic synchronous JSON serialization + disk I/O while the app is otherwise interactive.
+
+### Recommendation
+
+Keep `flushSync()` for shutdown, but make the normal debounced path async.
+
+In practice:
+
+- `_schedule()` can trigger an async write method
+- use `await _tmpFile.writeAsString(...)`
+- use `await _tmpFile.rename(...)`
+- keep errors swallowed/logged as they are now
+
+### Expected result
+
+- lower risk of frame hitches during heavy typing/editing
+- same behavior from the user perspective
+- no increase in conceptual complexity
+
+This is a clean performance win.
 
 ---
 
-### 1.3 `_closingTab` guard is never reset on exception
+## 3. Split `EditorScreen` by responsibility
 
-**Where:** `_handleCloseTab` (editor_screen.dart).
+**Priority:** high
+**Why:** improves organization and lowers cognitive load
+**File:** `lib/screens/editor_screen.dart` (~1176 lines)
 
-**Problem:** `_closingTab` is set `true` before the `try` and reset in `finally`, so this is actually fine structurally. However, the guard only prevents _re-entrant_ calls to `_handleCloseTab` — it doesn't prevent tab-bar mouse clicks from queuing a second close that fires after the dialog returns. In practice this is okay because `showDialog` is modal and captures pointer events, but the comment should say that rather than implying the guard alone is the protection.
+### Problem
+
+`EditorScreen` currently owns too much:
+
+- file open/save/close behavior
+- AI prompt lifecycle
+- AI streaming / diff accept-reject
+- provider switching
+- model loading / caching
+- prompt history
+- search UI behavior
+- line movement behavior
+- startup notices
+- widget tree rendering
+
+The code is not chaotic, but it is **too concentrated**.
+
+### Why this matters for simplicity
+
+A file this large becomes harder to reason about even when the code is good.
+The issue is not architecture quality; it is file size and responsibility breadth.
+
+### Recommendation
+
+Split mechanically, not architecturally.
+
+Good low-cost extraction targets:
+
+#### A. AI flow helpers
+
+Move these into a private helper file, extension, or mixin:
+
+- prompt open/dismiss
+- submit/cancel
+- diff accept/reject
+- provider/model/thinking state helpers
+- prompt history helpers
+- model fetch/cache logic
+
+#### B. File actions
+
+Move:
+
+- open file
+- save / save as
+- close tab dialog path
+- error dialog helpers
+- file-name helpers
+
+#### C. Pure text utilities
+
+Move pure functions out of widget state:
+
+- paragraph range helper
+- match computation helper
+
+### Expected result
+
+- easier navigation
+- smaller review surface for future changes
+- less risk when editing unrelated behavior
+
+Important: **do not introduce a new architecture package or pattern for this**. Simple extraction into a couple of private files is enough.
 
 ---
 
-## 2 — Performance
+## 4. `EditorState.onAnyChange` should be more structured
 
-### 2.1 Debounced session write is synchronous on the UI isolate
+**Priority:** medium-high
+**Why:** correctness and maintainability
+**File:** `lib/state/editor_state.dart`
 
-**Where:** `SessionService._write` — `writeAsStringSync` + `renameSync`.
+### Problem
 
-**Problem:** Every 500 ms while the user types, `jsonEncode` + sync file I/O runs on the main isolate. For a session with several large documents, this can cause a visible frame skip.
-
-**Fix:** Make the debounced path async (`writeAsString` / `rename`). Keep `flushSync` as-is for the exit path. Net change: ~5 lines.
-
----
-
-### 2.2 `_spaces` allocates a `List` then joins
-
-**Where:** `EditorArea._spaces`.
+`EditorState` exposes a mutable callback field:
 
 ```dart
-static String _spaces(int count) => List.filled(count, ' ').join();
+VoidCallback? onAnyChange;
 ```
 
-**Fix:** `' ' * count`. Same result, zero allocation, idiomatic Dart.
+This works, but it has drawbacks:
+
+- only one listener can exist safely
+- any code can overwrite it
+- lifecycle ownership is implicit
+- it is less idiomatic than the rest of the app
+
+### Why this matters for simplicity
+
+A raw field looks simple at first, but it creates a hidden contract.
+A more explicit mechanism is easier to reason about.
+
+### Recommendation
+
+Keep the overall idea, but make it slightly more formal. Good options:
+
+#### Option A — best balance
+
+Use a dedicated `ValueNotifier<int>` or `ChangeNotifier`-style internal notifier just for “any change”.
+
+#### Option B — minimal change
+
+Keep one listener only, but expose it as a setter and document/assert single assignment.
+
+### Expected result
+
+- clearer ownership
+- easier future expansion
+- more idiomatic API surface
+
+This is worth improving, but it is less urgent than the model typing and async session write changes.
 
 ---
 
-### 2.3 `_computeMatches` rebuilds on every keystroke in the find bar
+## 5. Add a small test suite
 
-**Where:** `_onSearchQueryChanged` → `_computeMatches`.
+**Priority:** medium-high
+**Why:** protects the app’s most important editor behavior
+**Current state:** no `test/` directory
 
-Not a problem at current document sizes, but for large files a `toLowerCase()` of the entire document on every character typed into the search field will lag. If this ever matters, debounce the search query by ~150 ms. No action needed now — just noting.
+### Problem
+
+There are several pieces of logic that are valuable and testable, but currently untested:
+
+- paragraph detection
+- search match computation
+- tab/session restore behavior
+- line move behavior
+- editor tab dirty-state transitions
+- session JSON behavior
+
+### Recommendation
+
+Do not aim for broad widget-test coverage first. Start with **small unit tests** around pure logic and state behavior.
+
+Best first tests:
+
+1. `EditorState.restoreFromSession()` edge cases
+2. search match helper
+3. paragraph range helper
+4. line move behavior
+5. session serialization rules
+
+### Expected result
+
+- protects the editor’s core behavior
+- supports future cleanup of `EditorScreen`
+- keeps refactors safe
+
+For an editor app, this is a better investment than adding more architecture.
 
 ---
 
-### 2.4 `UnmodifiableListView` is created on every `tabs` access
+## Additional findings
 
-**Where:** `EditorState.tabs` getter.
+---
+
+## 6. Duplicate blocked-shortcut maps should be shared
+
+**Priority:** medium
+**Files:**
+
+- `lib/widgets/ai_prompt_popup.dart`
+- `lib/widgets/ai_diff_view.dart`
+
+Both widgets define almost the same shortcut-blocking map using `DoNothingAndStopPropagationIntent()`.
+
+### Why it matters
+
+This is small duplication, but it creates drift risk if shortcuts change.
+
+### Recommendation
+
+Extract a shared `const` map in `lib/models/intents.dart` or a small helper.
+
+### Expected result
+
+- less duplication
+- one source of truth for overlay-blocked app shortcuts
+
+---
+
+## 7. `EditorTab.savedContent` should probably be updated through a method
+
+**Priority:** medium
+**File:** `lib/models/editor_tab.dart`
+
+### Problem
+
+`savedContent` is mutable and its relationship to `isDirtyNotifier` is managed externally.
+
+That is workable, but it means multiple places must remember the invariant.
+
+### Recommendation
+
+Consider a small method that updates the saved baseline and dirtiness together.
+
+Example shape:
 
 ```dart
-List<EditorTab> get tabs => UnmodifiableListView(_tabs);
-```
-
-Each call allocates a new wrapper. It's cheap, but the getter is called many times per frame (tab bar, editor area, search, etc.). Caching the wrapper and invalidating on mutation is trivial:
-
-```dart
-UnmodifiableListView<EditorTab>? _tabsView;
-List<EditorTab> get tabs => _tabsView ??= UnmodifiableListView(_tabs);
-// In every mutation: _tabsView = null;
-```
-
----
-
-## 3 — Idiomatic Dart / Flutter
-
-### 3.1 `onAnyChange` is a nullable `VoidCallback` field — should be a method or a `ChangeNotifier`
-
-**Where:** `EditorState.onAnyChange`.
-
-A public mutable `VoidCallback?` field is the least Dart-idiomatic callback mechanism. It works, but it means only one listener can exist, there's no removal/lifecycle contract, and any code can overwrite it.
-
-**Simpler alternative:** A dedicated `ValueNotifier<int>` bumped on every change (structural or text). `SessionService` listens to it. Zero new classes, clear ownership, multiple listeners possible if needed later.
-
-**Even simpler alternative (if you want to keep the current approach):** Make it a setter with an assertion that it's only set once, and document the contract.
-
----
-
-### 3.2 `AiModelSettings` data class is a positional grab-bag
-
-**Where:** `AiModelSettings` in `ai_prompt_popup.dart`.
-
-This class has 8 fields and is constructed with all-named parameters. It works, but several fields (`providerKey`, `providerNames`, `supportedThinkingLevels`) are provider-chrome concerns, not model settings. Consider splitting into `AiModelSettings` (models, selection, thinking) and passing provider info separately — or just accept the grab-bag and keep it as-is. Mentioning because the class name doesn't match its scope.
-
----
-
-### 3.3 `_effectiveModelForUi` is a free function, not a method
-
-**Where:** `ai_prompt_popup.dart`, top-level `_effectiveModelForUi`.
-
-It's called from both `_AiPromptPopupState.build` and `_ModelPicker.build`, plus the keyboard shortcut handler. Making it a static method on `AiModelSettings` would be more discoverable and would move with the class if it's ever extracted.
-
----
-
-### 3.4 Comments are excellent but occasionally over-explain
-
-**Where:** Throughout, but especially `editor_screen.dart` (175 comment lines out of 1,176 total = 15%).
-
-The comments on _why_ decisions were made (focus management, no `ValueKey`, `IntrinsicHeight` justification) are genuinely valuable. A few comments repeat what the code already says:
-
-```dart
-// True while the AI request is in-flight AND while the diff view is shown.
-// Keeps the editor readOnly so the snapshot remains valid.
-bool _editorReadOnly = false;
-```
-
-The name + the single usage site make this self-evident. Trimming the obvious ones would reduce noise without losing the important architectural notes.
-
----
-
-### 3.5 Prefer `async`/`await` over `.then`/`.catchError` chains
-
-**Where:** `_fetchModelsForActiveProvider` (editor_screen.dart).
-
-```dart
-_activeProvider
-    .fetchModels()
-    .then((result) { ... })
-    .catchError((_) { ... });
-```
-
-The `then`/`catchError` style is correct but less readable than:
-
-```dart
-Future<void> _fetchModelsForActiveProvider() async {
-  ...
-  try {
-    final result = await _activeProvider.fetchModels();
-    if (!mounted || _selectedProviderKey != key) return;
-    ...
-  } catch (_) {
-    if (mounted && _selectedProviderKey == key) {
-      setState(() => _modelsLoading = false);
-    }
-  }
+void markSaved(String content) {
+  savedContent = content;
+  isDirtyNotifier.value = controller.text != savedContent;
 }
 ```
 
-Same behavior, easier to follow, and consistent with every other async method in the file.
+### Expected result
+
+- fewer invariant leaks
+- less repeated code in state logic
+
+Not urgent, but a good cleanup.
 
 ---
 
-### 3.6 `import 'dart:ui'` in `main.dart` is unused
+## 8. Use `async` / `await` instead of `.then()` / `.catchError()` here
 
-**Where:** `lib/main.dart:1`.
+**Priority:** medium
+**File:** `lib/screens/editor_screen.dart`
 
-`AppExitResponse` is from `dart:ui`, so the import is technically used — but it's re-exported by `package:flutter/foundation.dart` (already transitively available). The `as ui` prefix in `editor_screen.dart` is the correct style; `main.dart` should match or just rely on the transitive export.
+Model fetching currently uses chained futures in one place.
 
----
+### Recommendation
 
-## 4 — Organization / simplicity
+Prefer `async` / `await` for consistency and readability.
 
-### 4.1 `EditorScreen` is 1,176 lines — the one file that needs splitting
+### Why
 
-**Where:** `lib/screens/editor_screen.dart`.
+This app mostly uses `async` / `await` already. Keeping one style improves readability, especially in a large stateful screen.
 
-This file handles: tab management, file I/O, dialogs, AI prompt lifecycle, streaming, diff accept/reject, model fetching/caching, provider switching, prompt history, find/search, line-move, paragraph detection, and the build tree.
-
-**Suggested split (no new architecture, just file boundaries):**
-
-| Extract to                                       | What moves                                                                                                                                                                        | ~Lines |
-| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| `_ai_actions.dart` (mixin or extension on State) | `_openAiPrompt`, `_submitAiPrompt`, `_cancelAiRequest`, `_acceptDiff`, `_rejectDiff`, `_dismissAiPrompt`, model fetch/cache, provider switching, history helpers, snapshot fields | ~350   |
-| `_file_actions.dart`                             | `_openFile`, `_saveTab`, `_saveTabAs`, `_writeFile`, `_handleCloseTab`, `_showDirtyCloseDialog`, `_showErrorDialog`, file-name helpers                                            | ~150   |
-
-This leaves `EditorScreen` at ~650 lines (lifecycle, build, search, line-move) — a reasonable size for a screen widget. Both extractions are pure method moves with no new types.
+This is a minor cleanup, not a major issue.
 
 ---
 
-### 4.2 Shortcut-blocker map is duplicated in two overlay widgets
+## 9. `UnmodifiableListView(_tabs)` is recreated on each getter call
 
-**Where:** `ai_prompt_popup.dart` and `ai_diff_view.dart`.
+**Priority:** low-medium
+**File:** `lib/state/editor_state.dart`
 
-Both define the same `DoNothingAndStopPropagationIntent` map for Ctrl+N/W/O/S/Shift+S/K. If a shortcut is added or changed, both must be updated.
+This is cheap, but it still allocates a new wrapper each time `tabs` is read.
 
-**Fix:** Extract to a shared `const` in `intents.dart`:
+### Recommendation
+
+If desired, cache the wrapper and invalidate it on structural changes.
+
+### Important note
+
+This is not a high-priority issue. It is much smaller than the synchronous session-write concern.
+
+---
+
+## 10. `EditorArea._spaces()` is non-idiomatic Dart
+
+**Priority:** low
+**File:** `lib/widgets/editor_area.dart`
+
+Current code builds spaces with `List.filled(...).join()`.
+
+### Recommendation
+
+Use:
 
 ```dart
-static const overlayBlockedShortcuts = <ShortcutActivator, Intent>{
-  SingleActivator(LogicalKeyboardKey.keyN, control: true): DoNothingAndStopPropagationIntent(),
-  // ...
-};
+' ' * count
 ```
 
----
+This is clearer and more idiomatic.
 
-### 4.3 `EditorTab.savedContent` is mutable — easy to get out of sync
-
-**Where:** `editor_tab.dart`.
-
-`savedContent` is a public mutable `String` field. It's written from three places: the constructor, `loadFileIntoTab`, and `onTabSaved`. The dirty check (`controller.text != savedContent`) is duplicated in the controller listener and in `onTabSaved`. A single method `setSavedContent(String)` that also updates `isDirtyNotifier` would eliminate the duplication and make the invariant impossible to break.
+Tiny issue, easy win.
 
 ---
 
-### 4.4 `_paragraphRangeAt` is a static on `_EditorScreenState` — belongs elsewhere
+## 11. Search is simple and acceptable, but may need debouncing for very large files
 
-**Where:** `editor_screen.dart`.
+**Priority:** low
+**Files:** search logic in `EditorScreen`
 
-It's a pure text-processing function with no dependency on widget state. Moving it to a `text_utils.dart` file (or making it a top-level function) would make it testable and reusable. Same for `_computeMatches`.
+The search implementation recomputes matches on every search-field change. For current scale this is fine.
 
----
+### Recommendation
 
-## 5 — What's already strong (keep as-is)
+Keep it as-is unless large-document performance becomes visible.
+If needed later, debounce the **search input**, not the whole editor.
 
-- **Flat architecture** — models/state/services/screens/widgets is the right depth for this app. No unnecessary layers.
-- **Reactive split** — `ChangeNotifier` for structural changes, `ValueNotifier<bool>` for dirty dots, `TextEditingController` for content. This is textbook Flutter and avoids keystroke rebuilds.
-- **Focus management** — deliberate, well-commented, and correct. The `ExcludeFocus` usage on tab buttons is a detail most Flutter apps get wrong.
-- **Session restore** — edge cases (missing files, dirty vs clean, counter continuity) are handled thoroughly.
-- **AI provider abstraction** — `AiProvider` interface is minimal and sufficient. Adding a third backend would be trivial.
-- **`IntrinsicHeight` justification** — the comment in `ai_diff_view.dart` explaining why it's acceptable here is the kind of documentation that saves future developers hours.
-- **Minimal dependencies** — only `file_selector`. No state management package, no DI framework, no code generation.
+This is a good example of where the current simpler solution is appropriate.
 
 ---
 
-## 6 — Suggested action order
+## Flutter / Dart idiomatic quality
 
-| Priority | Item                                                                                              | Effort                     |
-| -------- | ------------------------------------------------------------------------------------------------- | -------------------------- |
-| 1        | Replace `Map<String, dynamic>` models with typed `AiModel` class (1.1)                            | Small — net negative lines |
-| 2        | Make debounced session write async (2.1)                                                          | Tiny — ~5 lines            |
-| 3        | Extract `_paragraphRangeAt` / `_computeMatches` to testable utils (4.4)                           | Tiny                       |
-| 4        | Extract AI actions and file actions from `EditorScreen` (4.1)                                     | Medium — mechanical move   |
-| 5        | Centralize overlay shortcut-blocker map (4.2)                                                     | Tiny                       |
-| 6        | `' ' * count` instead of `List.filled` (2.2)                                                      | One-liner                  |
-| 7        | `async`/`await` in `_fetchModelsForActiveProvider` (3.5)                                          | Tiny                       |
-| 8        | Cache `UnmodifiableListView` (2.4)                                                                | Tiny                       |
-| 9        | Optional: typed `onAnyChange` mechanism (3.1), `AiModelSettings` rename (3.2), comment trim (3.4) | Small each                 |
+### Good idiomatic choices already present
 
-None of these add complexity. Items 1–3 actively reduce it.
+- `const` usage is generally good
+- small focused widgets for tab bar, diff view, find bar, editor area
+- `ValueListenableBuilder` used appropriately for dirty indicators
+- lifecycle cleanup is careful
+- desktop keyboard handling is deliberate and explicit
+- minimal abstraction surface for providers
+
+### Less idiomatic areas
+
+- raw `Map<String, dynamic>` data model use
+- mutable callback field for cross-object change subscription
+- one oversized `State` class doing too much
+
+These are important, but they are very fixable.
+
+---
+
+## Project-level review
+
+## `pubspec.yaml`
+
+### Good
+
+- very small dependency list
+- no unnecessary packages
+- no state-management framework overhead
+
+### Minor improvements
+
+- `description: "A new Flutter project."` is still the default and should be replaced
+- if desired, add a few extra lint rules in `analysis_options.yaml`, but keep this selective to preserve simplicity
+
+Recommended approach: keep lints lightweight.
+
+---
+
+## `analysis_options.yaml`
+
+Current config just includes `flutter_lints`.
+
+That is fine for this project.
+
+I would **not** add a large custom lint set unless the team wants stricter consistency. If you do add anything, keep it short and high-value.
+
+Good candidates only if wanted:
+
+- `unawaited_futures`
+- `directives_ordering`
+- `prefer_final_locals`
+
+But this is optional. The current simple setup is defensible.
+
+---
+
+## Platform runner code
+
+The platform folders are mostly stock Flutter runners.
+
+### Notes
+
+- Windows runner has a custom initial window sizing/positioning block, which is reasonable and isolated.
+- macOS AppDelegate changes are minimal and appropriate.
+- Linux runner appears stock and clean.
+
+No major issues here.
+
+---
+
+## Best things to keep exactly as they are
+
+These parts should be preserved during refactors:
+
+1. **Avoiding rebuilds on every keystroke**
+   This is the right call for an editor.
+
+2. **Minimal dependency footprint**
+   Very good for a desktop utility app.
+
+3. **Focused widget extraction**
+   `FindBar`, `EditorArea`, `EditorTabBar`, `AiDiffView`, and `AiPromptPopup` are useful boundaries.
+
+4. **Provider abstraction size**
+   `AiProvider` is small and sufficient. Do not make it more abstract unless needed.
+
+5. **Focus restoration discipline**
+   This is one of the app’s quality markers.
+
+---
+
+## Suggested implementation order
+
+### Quick wins
+
+1. Type the AI model data
+2. Make debounced session writes async
+3. Replace `.then()` / `.catchError()` with `async` / `await`
+4. Share the blocked-shortcut map
+5. Replace space generation with `' ' * count`
+
+### Next structural pass
+
+6. Split AI-related methods out of `EditorScreen`
+7. Split file-related methods out of `EditorScreen`
+8. Move pure text helpers into testable utility/state code
+9. Slightly formalize the `onAnyChange` contract
+
+### Reliability pass
+
+10. Add a small unit test suite around editor/state/session logic
+
+---
+
+## Final verdict
+
+This is already a **high-quality small Flutter app** with good instincts:
+
+- simple architecture
+- strong desktop behavior
+- good attention to performance where it matters most
+- minimal dependencies
+
+The main opportunity is not to add patterns, but to **reduce friction**:
+
+- type the AI model data
+- remove sync writes from the normal edit path
+- shrink `EditorScreen`
+- add a few targeted tests
+
+If those changes are made, the codebase will become noticeably easier to maintain **without becoming more complicated**.
