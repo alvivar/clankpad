@@ -129,100 +129,42 @@ This batch drops support for older persisted session formats.
 
 ## Batch 4 — Remove defensive code if you want a stricter, leaner implementation
 
-These are defensive safety nets. They are probably unnecessary under the current UI rules, but they do provide protection if the flow changes later.
+**Status:** skipped — kept as defensive safety net
 
 ### 8. Remove AI snapshot tab safety-net
 
+- **Status:** skipped
 - **File:** `lib/screens/editor_screen.dart`
-- **Remove / simplify:**
-  - `_snapshotTabId`
-  - `_snapshotTab`
-  - fallback logic that tries to find the snapshotted tab later
-- **Why:** while AI is active, the app blocks tab switching, tab closing, opening files, and creating tabs. Under current behavior, the active tab should not change.
-- **Risk:** medium
-- **Recommendation:** only remove this after confirming all AI-active guards are intentional and permanent.
-
-### Validation for Batch 4
-
-- start AI prompt
-- cancel during loading
-- accept diff
-- reject diff
-- verify edits always apply to the expected tab
+- **Decision:** keep `_snapshotTabId` and `_snapshotTab`. All structural mutations are guarded by `_aiActive` with no gaps, so the safety net is technically redundant. However the code is tiny (~15 lines), has no performance cost, and protects against future mutations that might forget the `_aiActive` guard. Not worth removing.
 
 ---
 
 ## Batch 5 — Project/file cleanup based on product scope
 
-These are not code-level dead branches; they are project-level removals if the app scope is narrower.
+**Status:** skipped — not worth the churn
 
 ### 9. Remove empty Apple test stubs
 
-- **Files:**
-  - `ios/RunnerTests/RunnerTests.swift`
-  - `macos/RunnerTests/RunnerTests.swift`
-- **Why:** they are template tests with no assertions and no useful coverage.
-- **Risk:** low, but removing them also requires cleaning up Xcode project references / test targets.
+- **Status:** skipped
+- **Files:** `ios/RunnerTests/RunnerTests.swift`, `macos/RunnerTests/RunnerTests.swift`
+- **Decision:** removing them requires editing Xcode `.pbxproj` and `.xcscheme` files to clean up test target references. Not worth the fiddly XML surgery for empty test stubs.
 
 ### 10. Remove mobile platform folders if the app is desktop-only
 
-- **Folders:**
-  - `android/`
-  - `ios/`
-- **Why:** README and SPEC position the app primarily as a Windows desktop app. If mobile is not a real target, these are maintenance overhead.
-- **Risk:** high from a project-scope perspective, low technically
-- **Only remove if:** you are intentionally committing to desktop-only support.
-
-### Validation for Batch 5
-
-- confirm supported target platforms in README / SPEC
-- run builds only for intended targets
-- verify CI / release scripts do not depend on removed targets
+- **Status:** skipped
+- **Folders:** `android/`, `ios/`
+- **Decision:** the app is fundamentally desktop-only, so these are dead weight. However, removing them is a one-way door and the folders cause no runtime or maintenance issues in practice. Can be revisited later if desired (`flutter create . --platforms=android,ios` regenerates them).
 
 ---
 
-## Recommended execution order
+## Final status
 
-1. **Batch 1** — easy wins, almost no behavior risk
-2. **Batch 2** — simplify unused flexibility in the popup API
-3. **Batch 3** — remove legacy compatibility if acceptable
-4. **Batch 4** — remove defensive safety nets only if you want stricter code
-5. **Batch 5** — project-scope cleanup
+| Batch | Description | Status |
+|-------|-------------|--------|
+| 1 | Safe low-risk code deletions | ✅ done |
+| 2 | Remove unused optional API branches | ✅ done |
+| 3 | Remove backward-compatibility code | ✅ done |
+| 4 | Remove defensive safety nets | skipped — kept as protection |
+| 5 | Project/file cleanup | skipped — not worth the churn |
 
----
-
-## Suggested stop points
-
-If you want conservative cleanup:
-
-- do **Batch 1 + Batch 2** only
-
-If you want pragmatic cleanup and do not care about old sessions:
-
-- do **Batch 1 + Batch 2 + Batch 3**
-
-If you want aggressive cleanup:
-
-- do **all batches**, but confirm platform scope first
-
----
-
-## Summary
-
-### Best low-risk removals
-
-- dead `_lastWarning` state in Claude provider
-- redundant `_diffVisible` check in `_aiActive`
-- no-op restore-time `notifyListeners()`
-- nullable / optional popup API branches that are never used
-
-### Conditional removals
-
-- legacy session migration
-- model-id-only fallback
-- AI snapshot tab safety-net
-
-### Project-level removals
-
-- empty iOS/macOS test stubs
-- mobile platform folders, if desktop-only is the confirmed scope
+All changes pass `flutter analyze`.
