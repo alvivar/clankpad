@@ -4,6 +4,15 @@ import 'dart:io';
 
 import 'ai_provider.dart';
 
+/// Raised when Pi returned an explicit `{success: false}` response to a
+/// command — i.e. Pi is alive and the protocol round-tripped, but the
+/// command itself was rejected (e.g. unknown model ID). Distinct from a
+/// plain [AiProviderError] which covers timeouts, process exits, and other
+/// transport failures that must be treated as fatal.
+class _PiCommandRejected extends AiProviderError {
+  const _PiCommandRejected(super.message);
+}
+
 /// [AiProvider] backed by Pi's RPC subprocess (`pi --mode rpc`).
 ///
 /// Pi is spawned on the first [fetchModels] or [streamEdit] call and kept alive
@@ -24,8 +33,10 @@ class PiProvider implements AiProvider {
   // Per-invocation sink. Created at the start of streamEdit, closed in finally.
   StreamController<String>? _lineController;
 
-  // For sendCommand — used only for get_available_models at popup open.
-  // _pendingCommands is always empty during active streaming.
+  // For sendCommand — id-tagged responses awaited via completer. Used for
+  // out-of-band queries (get_available_models, get_state) and for the
+  // pre-prompt setup sequence in streamEdit (set_model, set_thinking_level,
+  // new_session). Always empty once the prompt starts streaming.
   int _cmdCounter = 0;
   final Map<String, Completer<Map<String, dynamic>>> _pendingCommands = {};
 
@@ -50,9 +61,7 @@ class PiProvider implements AiProvider {
       sendCommand({'type': 'get_available_models'}),
       // get_state is best-effort — wrap so a failure doesn't poison
       // the whole Future.wait and leave the model list empty.
-      sendCommand({'type': 'get_state'}).catchError(
-        (_) => <String, dynamic>{},
-      ),
+      sendCommand({'type': 'get_state'}).catchError((_) => <String, dynamic>{}),
       loadEnabledModelPatterns(),
     ]);
 
@@ -60,23 +69,22 @@ class PiProvider implements AiProvider {
     final stateResp = results[1] as Map<String, dynamic>;
     final patterns = results[2] as List<String>?;
 
-    final all =
-        (modelsResp['data']['models'] as List).cast<Map<String, dynamic>>();
+    final all = (modelsResp['data']['models'] as List)
+        .cast<Map<String, dynamic>>();
 
     // Apply enabledModels filter from ~/.pi/agent/settings.json.
     // Fall back to full list if patterns are null/empty or every
     // model is excluded (avoids a blank dropdown on bad config).
-    final filtered =
-        (patterns != null && patterns.isNotEmpty)
-            ? all
-                .where(
-                  (m) => matchesEnabledPattern(
-                    '${m['provider']}/${m['id']}',
-                    patterns,
-                  ),
-                )
-                .toList()
-            : all;
+    final filtered = (patterns != null && patterns.isNotEmpty)
+        ? all
+              .where(
+                (m) => matchesEnabledPattern(
+                  '${m['provider']}/${m['id']}',
+                  patterns,
+                ),
+              )
+              .toList()
+        : all;
     final models = filtered.isNotEmpty ? filtered : all;
 
     // Extract Pi's live state for seeding suggestions.
@@ -102,8 +110,11 @@ class PiProvider implements AiProvider {
 
   /// Sends a command with a unique `id` and awaits its `response` event.
   ///
-  /// Used only for out-of-band queries (e.g. `get_available_models`) that need
-  /// data back before streaming starts. Throws [AiProviderError] on timeout
+  /// Used for out-of-band queries (e.g. `get_available_models`) and for the
+  /// pre-prompt setup inside [streamEdit] (`set_model` / `set_thinking_level`
+  /// / `new_session`) — awaiting each response forces Pi to commit each
+  /// command before the next one runs, which avoids a race with Pi's
+  /// concurrent JSONL dispatcher. Throws [AiProviderError] on timeout
   /// (5 s) or `success: false`.
   Future<Map<String, dynamic>> sendCommand(Map<String, dynamic> cmd) async {
     await _ensureRunning();
@@ -120,7 +131,7 @@ class PiProvider implements AiProvider {
       },
     );
     if (response['success'] == false) {
-      throw AiProviderError(
+      throw _PiCommandRejected(
         response['error'] as String? ?? "Command failed: ${cmd['type']}",
       );
     }
@@ -133,6 +144,14 @@ class PiProvider implements AiProvider {
   /// When [modelId] is non-null, `set_model` is sent before `new_session`.
   /// `set_thinking_level` is always sent — Pi ignores it for non-reasoning
   /// models, so no guard is needed here.
+  ///
+  /// **Ordering:** `set_model`, `set_thinking_level`, and `new_session` are
+  /// sent with an `id` via [sendCommand] and **awaited sequentially** before
+  /// the prompt. Pi's RPC dispatcher handles incoming lines concurrently
+  /// (`void handleInputLine(line)` in `rpc-mode.js`), and `prompt` is
+  /// fire-and-forget on its side. Sending all four in one flush would race:
+  /// the prompt could start before `set_model`/`new_session` commit, running
+  /// on the previous session/model.
   ///
   /// Completes normally when `agent_end` is received — including after [abort].
   /// Throws [AiProviderError] on process launch failure or unrecoverable error.
@@ -153,21 +172,47 @@ class PiProvider implements AiProvider {
     _lineController = controller;
     String? modelSwitchError;
 
-    // Send all commands in one flush:
-    //   [set_model] → [set_thinking_level] → new_session → prompt
-    if (modelId != null) {
-      _process!.stdin.writeln(
-        jsonEncode({
-          'type': 'set_model',
-          'provider': modelProvider,
-          'modelId': modelId,
-        }),
-      );
+    // Setup: await each response before the next command, so Pi's async
+    // command handlers (set_model, new_session) are fully committed before
+    // the prompt fires.
+    //
+    // Only an explicit RPC rejection (_PiCommandRejected) on set_model /
+    // set_thinking_level is downgraded to a non-fatal warning — Pi then
+    // falls back to its current model/level and the prompt still runs.
+    // Timeouts, process exits, and other transport failures bubble up as
+    // AiProviderError and abort the edit.
+    try {
+      if (modelId != null) {
+        try {
+          await sendCommand({
+            'type': 'set_model',
+            'provider': modelProvider,
+            'modelId': modelId,
+          });
+        } on _PiCommandRejected catch (e) {
+          modelSwitchError = e.message;
+        }
+      }
+      try {
+        await sendCommand({
+          'type': 'set_thinking_level',
+          'level': thinkingLevel,
+        });
+      } on _PiCommandRejected catch (e) {
+        modelSwitchError ??= e.message;
+      }
+      // new_session: both rejection and transport failure are fatal — we
+      // can't run a prompt without a fresh session.
+      await sendCommand({'type': 'new_session'});
+    } on AiProviderError {
+      _lineController = null;
+      if (!controller.isClosed) await controller.close();
+      await _killProcess();
+      rethrow;
     }
-    _process!.stdin.writeln(
-      jsonEncode({'type': 'set_thinking_level', 'level': thinkingLevel}),
-    );
-    _process!.stdin.writeln(jsonEncode({'type': 'new_session'}));
+
+    // Setup committed; fire the prompt. Not id-tagged — its response and
+    // all subsequent events flow through _lineController to the loop below.
     _process!.stdin.writeln(
       jsonEncode({
         'type': 'prompt',
@@ -196,20 +241,10 @@ class PiProvider implements AiProvider {
 
         final type = event['type'] as String?;
 
-        // Response acks — id-tagged ones never reach here (routed by
-        // _processLine to _pendingCommands). Check success on the ones
-        // that matter; silently skip the rest (new_session, abort).
+        // Only the prompt ack flows through here now — id-tagged setup
+        // responses are routed by _processLine to _pendingCommands and
+        // consumed by sendCommand above.
         if (type == 'response') {
-          // set_model / set_thinking_level failures are non-fatal: Pi falls
-          // back to its current model/level and the prompt still runs.
-          if (event['command'] == 'set_model' && event['success'] != true) {
-            modelSwitchError = event['error'] as String? ?? 'set_model failed';
-          }
-          if (event['command'] == 'set_thinking_level' &&
-              event['success'] != true) {
-            modelSwitchError ??=
-                event['error'] as String? ?? 'set_thinking_level failed';
-          }
           if (event['command'] == 'prompt' && event['success'] != true) {
             throw const AiProviderError(
               'Pi process exited unexpectedly — try again.',
@@ -338,8 +373,9 @@ class PiProvider implements AiProvider {
 
   /// Routes each stdout line: id-tagged `response` events go to the matching
   /// [Completer] in [_pendingCommands]; everything else forwards to
-  /// [_lineController]. During active streaming, [_pendingCommands] is always
-  /// empty so the routing branch is a constant-time no-op.
+  /// [_lineController]. Both paths coexist during setup inside [streamEdit]:
+  /// setup responses are id-tagged and completer-routed, while prompt acks
+  /// and agent events stream through [_lineController].
   void _processLine(String line) {
     final Map<String, dynamic> event;
     try {
@@ -362,9 +398,7 @@ class PiProvider implements AiProvider {
     _stdoutSub = null;
     // Complete any in-flight sendCommand calls with an error.
     for (final c in _pendingCommands.values) {
-      c.completeError(
-        const AiProviderError('Pi process exited unexpectedly.'),
-      );
+      c.completeError(const AiProviderError('Pi process exited unexpectedly.'));
     }
     _pendingCommands.clear();
     final c = _lineController;
