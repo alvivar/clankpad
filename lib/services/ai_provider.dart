@@ -67,6 +67,27 @@ abstract class AiProvider {
 
   // ── Shared prompt construction ────────────────────────────────────────────
 
+  /// System prompt passed to every provider (`pi --system-prompt` /
+  /// `claude --system-prompt`). Frames the model as a text-editor assistant
+  /// rather than a coding agent — both Pi and Claude Code default to a
+  /// coding-agent system prompt, which biases output toward code fences,
+  /// tool usage, and verbose explanations. The per-request prompts built by
+  /// [buildPromptMessage] still include `IMPORTANT:` contract lines as
+  /// belt-and-suspenders.
+  ///
+  /// Kept as a single line (adjacent-string concatenation) so it can be
+  /// passed through `Process.start` on Windows without multi-line argv
+  /// quoting issues.
+  static const String systemPrompt =
+      'You are an assistant embedded in a text editor. '
+      "Your job is to transform text according to the user's instruction. "
+      'Return ONLY the requested output text. '
+      'Do not include explanations, preambles, commentary, or surrounding '
+      'markdown code fences unless the user explicitly asks for them. '
+      "Preserve the document's style, tone, formatting, indentation, and "
+      'structure unless the user asks to change them. '
+      'The document may contain prose, notes, markdown, lists, or code.';
+
   /// Builds the prompt message sent to the model. Shared across all providers
   /// because the editing contract (document + target + instruction) is the
   /// same regardless of backend.

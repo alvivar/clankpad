@@ -520,8 +520,10 @@ Install example:
 Spawn arguments:
 
 ```
-pi --mode rpc --no-session --no-tools --no-extensions --no-skills --no-prompt-templates
+pi --mode rpc --no-session --no-tools --no-extensions --no-skills --no-prompt-templates --system-prompt "<Clankpad system prompt>"
 ```
+
+The system prompt (see §4.2) frames the model as a text-editor assistant rather than a coding agent, overriding Pi's default coding-agent framing.
 
 On Windows, `Process.start(..., runInShell: true)` is used so `pi.cmd` resolves.
 
@@ -609,12 +611,15 @@ Claude Code (`claude -p`) is an alternative AI backend. Unlike Pi, it uses a **o
 
 #### Process model
 
-- Each `streamEdit` call spawns `claude -p "<prompt>" --output-format stream-json --verbose --include-partial-messages`.
+- Each `streamEdit` call spawns `claude -p --output-format stream-json --verbose --include-partial-messages --no-session-persistence --system-prompt "<Clankpad system prompt>"`.
+- The prompt itself is written to the process's stdin (not passed as an argv) to avoid Windows command-line length limits and shell quoting issues.
 - If `modelId` is non-null, `--model <modelId>` is appended.
+- If `thinkingLevel != 'off'`, `--effort <level>` is appended.
+- The system prompt (see §4.2) replaces Claude Code's default coding-agent system prompt via `--system-prompt` (not `--append-system-prompt`), matching Pi's framing.
 - The process streams newline-delimited JSON to stdout; tokens are extracted from events matching `type == "stream_event"` where `event.delta.type == "text_delta"`.
 - Completion = process exit. No explicit `agent_end` event.
 - Abort = kill the process.
-- `fetchModels()` returns an empty list — Claude Code manages its own model via `claude config`.
+- `fetchModels()` returns a small hardcoded model list — Claude Code does not expose a queryable catalogue.
 
 #### Prerequisites
 
@@ -623,13 +628,28 @@ Claude Code (`claude -p`) is an alternative AI backend. Unlike Pi, it uses a **o
 
 #### Differences from Pi
 
-| Aspect          | Pi                               | Claude Code                       |
-| --------------- | -------------------------------- | --------------------------------- |
-| Lifecycle       | Long-lived warm process          | One-shot per request              |
-| Model list      | `get_available_models` RPC       | Not queryable; empty model picker |
-| Model switching | `set_model` RPC command          | `--model` CLI flag                |
-| Thinking level  | `set_thinking_level` RPC command | Not supported via CLI             |
-| Abort           | `{"type":"abort"}` on stdin      | Kill process                      |
+| Aspect          | Pi                               | Claude Code          |
+| --------------- | -------------------------------- | -------------------- |
+| Lifecycle       | Long-lived warm process          | One-shot per request |
+| Model list      | `get_available_models` RPC       | Hardcoded catalogue  |
+| Model switching | `set_model` RPC command          | `--model` CLI flag   |
+| Thinking level  | `set_thinking_level` RPC command | `--effort` CLI flag  |
+| Abort           | `{"type":"abort"}` on stdin      | Kill process         |
+
+### 4.2 Shared system prompt
+
+Both providers are spawned with a shared, Clankpad-specific system prompt (defined in `AiProvider.systemPrompt`) that replaces the backend's default coding-agent framing. This is critical because both Pi and Claude Code default to system prompts that describe the model as an "expert coding assistant" with tools, projects, and files — a frame that biases output toward code fences, verbose explanations, and tool-flavored behavior, all of which are wrong for a notepad.
+
+The prompt (single line, adjacent-string concatenation in source):
+
+> You are an assistant embedded in a text editor. Your job is to transform text according to the user's instruction. Return ONLY the requested output text. Do not include explanations, preambles, commentary, or surrounding markdown code fences unless the user explicitly asks for them. Preserve the document's style, tone, formatting, indentation, and structure unless the user asks to change them. The document may contain prose, notes, markdown, lists, or code.
+
+Notes:
+
+- One prompt for both edit mode and insert mode — mode-specific behavior lives in [`AiProvider.buildPromptMessage`](#404-prompt-formats-edit-vs-insert).
+- Per-request `IMPORTANT:` contract lines in `buildPromptMessage` are kept as belt-and-suspenders.
+- For Pi, `buildSystemPrompt()` still appends `Current date: …` and `Current working directory: …` at the end even when `--system-prompt` is set — harmless residual but present.
+- Single-line form (no embedded `\n`) for robust Windows argv passthrough with `runInShell: true`.
 
 ---
 

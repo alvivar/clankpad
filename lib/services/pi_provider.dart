@@ -342,6 +342,8 @@ class PiProvider implements AiProvider {
           '--no-extensions',
           '--no-skills',
           '--no-prompt-templates',
+          '--system-prompt',
+          AiProvider.systemPrompt,
         ],
         // Required on Windows: the npm global install creates pi.cmd, not
         // pi.exe, and Process.start only resolves .cmd wrappers via the shell.

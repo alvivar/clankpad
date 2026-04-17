@@ -85,6 +85,10 @@ class ClaudeCodeProvider implements AiProvider {
       '--verbose',
       '--include-partial-messages',
       '--no-session-persistence',
+      // Replace Claude's default coding-agent system prompt with our
+      // text-editor framing. See [AiProvider.systemPrompt] for rationale.
+      '--system-prompt',
+      AiProvider.systemPrompt,
     ];
 
     if (modelId != null) {
