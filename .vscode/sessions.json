@@ -1,0 +1,47 @@
+{
+  "active": "default",
+  "activateOnStartup": true,
+  "keepExistingTerminals": false,
+  "noClear": true,
+  "sessions": {
+    "default": [
+      {
+        "name": "opus",
+        "icon": "hubot",
+        "color": "terminal.ansiMagenta",
+        "autoExecuteCommands": true,
+        "focus": true,
+        "commands": [
+          "source C:/Users/andre/miniconda3/etc/profile.d/conda.sh && conda activate pi && pi-link opus@clankpad"
+        ]
+      },
+      {
+        "name": "gpt",
+        "icon": "copilot",
+        "color": "terminal.ansiBlue",
+        "autoExecuteCommands": true,
+        "commands": [
+          "source C:/Users/andre/miniconda3/etc/profile.d/conda.sh && conda activate pi && pi-link gpt@clankpad"
+        ]
+      },
+      {
+        "name": "committer",
+        "icon": "git-commit",
+        "color": "terminal.ansiWhite",
+        "autoExecuteCommands": true,
+        "commands": [
+          "source C:/Users/andre/miniconda3/etc/profile.d/conda.sh && conda activate pi && pi --session $(pi-link resolve committer@clankpad)"
+        ]
+      },
+      {
+        "name": "bash",
+        "autoExecuteCommands": true,
+        "icon": "terminal-bash",
+        "color": "terminal.ansiWhite",
+        "commands": [
+          "source C:/Users/andre/miniconda3/etc/profile.d/conda.sh && conda activate pi"
+        ]
+      }
+    ]
+  }
+}
