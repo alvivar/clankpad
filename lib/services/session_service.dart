@@ -10,6 +10,13 @@ class SessionService {
   final EditorState _state;
   Timer? _debounce;
 
+  // Generation counter for async writes. Incremented at the start of each
+  // _write() call and by flushSync(). An in-flight async write checks its
+  // captured generation after each await; a mismatch means a newer write
+  // (sync or async) has superseded it, so it bails before clobbering the
+  // fresher session.json.
+  int _writeGen = 0;
+
   late final File _sessionFile;
   late final File _tmpFile;
 
@@ -64,19 +71,49 @@ class SessionService {
     _debounce = Timer(const Duration(milliseconds: 500), _write);
   }
 
-  void _write() {
+  // Async path: runs every 500 ms during typing. JSON is captured inside the
+  // try so jsonEncode errors don't escape as unhandled async errors. The
+  // generation guard ensures a later flushSync (or a later _write) supersedes
+  // a slow in-flight write. The tmp path is per-generation so concurrent
+  // _writeSync / overlapping _writes never contend on the same file.
+  Future<void> _write() async {
+    final gen = ++_writeGen;
+    final tmp = File('${_sessionFile.path}.$gen.tmp');
     try {
-      // Ensure the session directory exists.
+      final json = _buildJson();
       final dir = _sessionFile.parent;
-      if (!dir.existsSync()) dir.createSync(recursive: true);
+      if (!await dir.exists()) await dir.create(recursive: true);
+      if (gen != _writeGen) return;
 
-      // Write to .tmp then atomically rename to .json.
+      // Write to per-generation .tmp then atomically rename to .json.
       // On NTFS, rename is atomic — a crash mid-write leaves the previous
       // session.json intact.
+      await tmp.writeAsString(json);
+      if (gen != _writeGen) {
+        try {
+          await tmp.delete();
+        } catch (_) {}
+        return;
+      }
+      await tmp.rename(_sessionFile.path);
+    } catch (e) {
+      // Session write errors must never crash the app.
+      debugPrint('Session write failed: $e');
+      try {
+        await tmp.delete();
+      } catch (_) {}
+    }
+  }
+
+  // Sync path: shared by flushSync. Kept separate from _write because the exit
+  // contract demands the file is on disk before the function returns.
+  void _writeSync() {
+    try {
+      final dir = _sessionFile.parent;
+      if (!dir.existsSync()) dir.createSync(recursive: true);
       _tmpFile.writeAsStringSync(_buildJson());
       _tmpFile.renameSync(_sessionFile.path);
     } catch (e) {
-      // Session write errors must never crash the app.
       debugPrint('Session write failed: $e');
     }
   }
@@ -86,10 +123,12 @@ class SessionService {
   // Called from AppLifecycleListener.onExitRequested.
   // Cancels the pending debounce timer and writes synchronously so no changes
   // are lost when the window is closed within the 500 ms debounce window.
+  // Bumps [_writeGen] so any in-flight async _write bails on its next await.
   void flushSync() {
     _debounce?.cancel();
     _debounce = null;
-    _write();
+    _writeGen++;
+    _writeSync();
   }
 
   // ── JSON serialisation ───────────────────────────────────────────────────────
