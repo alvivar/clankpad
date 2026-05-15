@@ -701,17 +701,12 @@ class _EditorScreenState extends State<EditorScreen> {
     _historyIndex = _promptHistory.length;
 
     // Persist provider + model + thinking level so the next session starts
-    // with the same selection. Written to EditorState fields; the debounced
-    // session save picks them up automatically.
-    _state.lastProviderKey = _selectedProviderKey;
+    // with the same selection. setAiPrefs fires onAnyChange so the debounced
+    // session writer schedules a save.
     final prefs = <String, String>{'thinkingLevel': _thinkingLevel};
-    if (_selectedProvider != null) {
-      prefs['modelProvider'] = _selectedProvider!;
-    }
-    if (_selectedModelId != null) {
-      prefs['modelId'] = _selectedModelId!;
-    }
-    _state.providerPrefs[_selectedProviderKey] = prefs;
+    if (_selectedProvider != null) prefs['modelProvider'] = _selectedProvider!;
+    if (_selectedModelId != null) prefs['modelId'] = _selectedModelId!;
+    _state.setAiPrefs(_selectedProviderKey, prefs);
 
     setState(() {
       _aiPromptVisible = false;

@@ -194,6 +194,15 @@ class EditorState extends ChangeNotifier {
     _structuralChange();
   }
 
+  // Updates the active AI provider key and that provider's prefs, then fires
+  // onAnyChange so the debounced session writer schedules a save. Must be used
+  // instead of direct field assignment — those would silently fail to persist.
+  void setAiPrefs(String providerKey, Map<String, String> prefs) {
+    lastProviderKey = providerKey;
+    providerPrefs[providerKey] = prefs;
+    onAnyChange?.call();
+  }
+
   // ── Session restore ──────────────────────────────────────────────────────────
 
   // Restores editor state from a parsed session.json map.
