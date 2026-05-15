@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/intents.dart';
+import '../services/ai_provider.dart';
 
 /// Snapshot of model/thinking state passed from EditorScreen to the popup.
 /// Kept as a data class so the popup receives a single param instead of many.
 class AiModelSettings {
-  final List<Map<String, dynamic>> availableModels;
+  final List<AiModel> availableModels;
   final bool loading;
   final String? selectedProvider;
   final String? selectedModelId;
@@ -124,7 +125,7 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
     final colorScheme = Theme.of(context).colorScheme;
     final settings = widget.modelSettings;
     final effectiveModel = _effectiveModelForUi(settings);
-    final modelSupportsThinking = effectiveModel?['reasoning'] == true;
+    final modelSupportsThinking = effectiveModel?.supportsReasoning ?? false;
 
     return Shortcuts(
       shortcuts: aiOverlayBlockedShortcuts,
@@ -201,10 +202,7 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                                 : models.indexOf(current);
                             final next = (cur + 1) % models.length;
                             final m = models[next];
-                            widget.onModelChanged(
-                              m['provider'] as String,
-                              m['id'] as String,
-                            );
+                            widget.onModelChanged(m.provider, m.id);
                           }
                           return KeyEventResult.handled;
                         }
@@ -311,10 +309,7 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
 
 // ── Private widgets ───────────────────────────────────────────────────────────
 
-String _modelKey(Map<String, dynamic> model) =>
-    '${model['provider']}/${model['id']}';
-
-Map<String, dynamic>? _effectiveModelForUi(AiModelSettings settings) {
+AiModel? _effectiveModelForUi(AiModelSettings settings) {
   if (settings.availableModels.isEmpty) return null;
 
   // No explicit selection yet: mirror the dropdown's visible fallback.
@@ -323,8 +318,8 @@ Map<String, dynamic>? _effectiveModelForUi(AiModelSettings settings) {
   }
 
   for (final m in settings.availableModels) {
-    if (m['provider'] == settings.selectedProvider &&
-        m['id'] == settings.selectedModelId) {
+    if (m.provider == settings.selectedProvider &&
+        m.id == settings.selectedModelId) {
       return m;
     }
   }
@@ -361,29 +356,24 @@ class _ModelPicker extends StatelessWidget {
     if (settings.availableModels.isEmpty) return const SizedBox.shrink();
 
     // Keep dropdown selection aligned with the same effective model logic used
-    // by the footer and keyboard shortcuts.
+    // by the footer and keyboard shortcuts. AiModel == compares on (provider,
+    // id) so the value matches across rebuilds even with fresh instances.
     final currentModel = _effectiveModelForUi(settings)!;
-    final currentKey = _modelKey(currentModel);
 
-    return DropdownButton<String>(
-      value: currentKey,
+    return DropdownButton<AiModel>(
+      value: currentModel,
       isDense: true,
       underline: const SizedBox.shrink(),
       style: TextStyle(fontSize: 12, color: colorScheme.onSurface),
       items: settings.availableModels.map((m) {
-        return DropdownMenuItem<String>(
-          value: _modelKey(m),
-          child: Text(
-            '${m['provider']}  ·  ${m['name'] as String? ?? m['id'] as String}',
-          ),
+        return DropdownMenuItem<AiModel>(
+          value: m,
+          child: Text('${m.provider}  ·  ${m.name}'),
         );
       }).toList(),
-      onChanged: (key) {
-        if (key == null) return;
-        final m = settings.availableModels.firstWhere(
-          (m) => _modelKey(m) == key,
-        );
-        onChanged(m['provider'] as String, m['id'] as String);
+      onChanged: (m) {
+        if (m == null) return;
+        onChanged(m.provider, m.id);
         onFocusBack?.call();
       },
     );

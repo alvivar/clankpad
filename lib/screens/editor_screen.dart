@@ -97,11 +97,11 @@ class _EditorScreenState extends State<EditorScreen> {
   // ── Model / thinking state ──────────────────────────────────────────────────
 
   // Per-provider model cache — fetched once per provider, reused on switch-back.
-  final Map<String, List<Map<String, dynamic>>> _modelCache = {};
+  final Map<String, List<AiModel>> _modelCache = {};
   // Full fetch result (includes suggestions) — kept for switch-back seeding.
   final Map<String, AiProviderModels> _fetchResultCache = {};
 
-  List<Map<String, dynamic>> _availableModels = [];
+  List<AiModel> _availableModels = [];
   bool _modelsLoading = false;
   String? _selectedProvider;
   String? _selectedModelId; // null = let provider use its configured default
@@ -571,7 +571,7 @@ class _EditorScreenState extends State<EditorScreen> {
   /// suggestions.
   void _applyCachedModels(
     String providerKey,
-    List<Map<String, dynamic>> models,
+    List<AiModel> models,
     AiProviderModels? fetchResult,
   ) {
     // Seed model + thinking level from per-provider prefs. Priority:
@@ -581,7 +581,7 @@ class _EditorScreenState extends State<EditorScreen> {
     bool modelInList(String? provider, String? id) =>
         provider != null &&
         id != null &&
-        models.any((m) => m['id'] == id && m['provider'] == provider);
+        models.any((m) => m.id == id && m.provider == provider);
 
     final prefs = _state.providerPrefs[providerKey];
     final prefProvider = prefs?['modelProvider'];
@@ -611,8 +611,8 @@ class _EditorScreenState extends State<EditorScreen> {
     // If no seed was found, fall back to first model in the list so that
     // _selectedProvider/_selectedModelId are always populated when models exist.
     if (seedProvider == null && models.isNotEmpty) {
-      seedProvider = models.first['provider'] as String?;
-      seedModelId = models.first['id'] as String?;
+      seedProvider = models.first.provider;
+      seedModelId = models.first.id;
     }
 
     setState(() {

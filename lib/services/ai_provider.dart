@@ -7,10 +7,36 @@ class AiProviderError implements Exception {
   String toString() => message;
 }
 
+/// A single AI model exposed by a provider.
+///
+/// Identity is `(provider, id)`; [name] is for display and [supportsReasoning]
+/// is a capability bit driving the thinking-level picker.
+class AiModel {
+  final String provider;
+  final String id;
+  final String name;
+  final bool supportsReasoning;
+
+  const AiModel({
+    required this.provider,
+    required this.id,
+    required this.name,
+    this.supportsReasoning = false,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AiModel && other.provider == provider && other.id == id;
+
+  @override
+  int get hashCode => Object.hash(provider, id);
+}
+
 /// Result of [AiProvider.fetchModels]: the filtered model list plus optional
 /// defaults suggested by the provider (e.g. Pi's live state via `get_state`).
 class AiProviderModels {
-  final List<Map<String, dynamic>> models;
+  final List<AiModel> models;
 
   /// Suggested model to pre-select (provider may return null).
   final String? suggestedProvider;

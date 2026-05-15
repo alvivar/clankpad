@@ -28,25 +28,25 @@ class ClaudeCodeProvider implements AiProvider {
   // ── Public API ──────────────────────────────────────────────────────────────
 
   // Hardcoded model catalogue. Update when Anthropic ships new models.
-  static const _models = <Map<String, dynamic>>[
-    {
-      'id': 'claude-opus-4-6',
-      'name': 'Claude Opus 4.6',
-      'provider': 'anthropic',
-      'reasoning': true,
-    },
-    {
-      'id': 'claude-sonnet-4-6',
-      'name': 'Claude Sonnet 4.6',
-      'provider': 'anthropic',
-      'reasoning': true,
-    },
-    {
-      'id': 'claude-haiku-4-5',
-      'name': 'Claude Haiku 4.5',
-      'provider': 'anthropic',
-      'reasoning': true,
-    },
+  static const _models = <AiModel>[
+    AiModel(
+      provider: 'anthropic',
+      id: 'claude-opus-4-6',
+      name: 'Claude Opus 4.6',
+      supportsReasoning: true,
+    ),
+    AiModel(
+      provider: 'anthropic',
+      id: 'claude-sonnet-4-6',
+      name: 'Claude Sonnet 4.6',
+      supportsReasoning: true,
+    ),
+    AiModel(
+      provider: 'anthropic',
+      id: 'claude-haiku-4-5',
+      name: 'Claude Haiku 4.5',
+      supportsReasoning: true,
+    ),
   ];
 
   @override

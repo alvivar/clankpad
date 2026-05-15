@@ -74,7 +74,16 @@ class PiProvider implements AiProvider {
     final patterns = results[2] as List<String>?;
 
     final all = (modelsResp['data']['models'] as List)
-        .cast<Map<String, dynamic>>();
+        .cast<Map<String, dynamic>>()
+        .map(
+          (m) => AiModel(
+            provider: m['provider'] as String,
+            id: m['id'] as String,
+            name: m['name'] as String? ?? m['id'] as String,
+            supportsReasoning: m['reasoning'] == true,
+          ),
+        )
+        .toList();
 
     // Apply enabledModels filter from ~/.pi/agent/settings.json.
     // Fall back to full list if patterns are null/empty or every
@@ -82,10 +91,7 @@ class PiProvider implements AiProvider {
     final filtered = (patterns != null && patterns.isNotEmpty)
         ? all
               .where(
-                (m) => matchesEnabledPattern(
-                  '${m['provider']}/${m['id']}',
-                  patterns,
-                ),
+                (m) => matchesEnabledPattern('${m.provider}/${m.id}', patterns),
               )
               .toList()
         : all;
@@ -102,7 +108,7 @@ class PiProvider implements AiProvider {
     final inList =
         piModelId != null &&
         piProvider != null &&
-        models.any((m) => m['id'] == piModelId && m['provider'] == piProvider);
+        models.any((m) => m.id == piModelId && m.provider == piProvider);
 
     return AiProviderModels(
       models: models,
