@@ -129,8 +129,6 @@ class ClaudeCodeProvider implements AiProvider {
     final stderrBuf = StringBuffer();
     proc.stderr.transform(utf8.decoder).listen((data) => stderrBuf.write(data));
 
-    bool anyOutput = false;
-
     try {
       await for (final line
           in proc.stdout
@@ -153,7 +151,6 @@ class ClaudeCodeProvider implements AiProvider {
           if (delta?['type'] == 'text_delta') {
             final text = delta!['text'] as String?;
             if (text != null && text.isNotEmpty) {
-              anyOutput = true;
               yield text;
             }
           }
@@ -164,7 +161,10 @@ class ClaudeCodeProvider implements AiProvider {
       // Only check exit code if we weren't aborted by the user.
       if (!_aborted) {
         final exitCode = await proc.exitCode;
-        if (exitCode != 0 && !anyOutput) {
+        // Any non-zero exit is a hard error, even after partial output: silently
+        // accepting partial deltas as a successful completion would let the user
+        // accept a truncated diff and corrupt their document.
+        if (exitCode != 0) {
           final errMsg = stderrBuf.toString().trim();
           throw AiProviderError(
             errMsg.isNotEmpty

@@ -723,6 +723,7 @@ class _EditorScreenState extends State<EditorScreen> {
     });
 
     bool diffOpened = false;
+    bool errored = false;
 
     try {
       await for (final chunk in _activeProvider.streamEdit(
@@ -781,23 +782,30 @@ class _EditorScreenState extends State<EditorScreen> {
         setState(() => _errorBanner = 'Model switch failed: $switchErr');
       }
     } on AiProviderError catch (e) {
+      errored = true;
       if (!mounted) return;
       setState(() => _errorBanner = e.message);
     } catch (e) {
+      errored = true;
       if (!mounted) return;
       setState(() => _errorBanner = 'Unexpected error — $e');
     } finally {
       // Always unlock the editor, even on error or cancel.
-      // If the diff is visible the editor was already locked; it stays locked
-      // until the user accepts/rejects, so we only clear it here when the
-      // diff did not open (error or pre-diff cancel).
+      // If an error ended the stream after the diff opened, auto-reject the
+      // partial diff: a single Enter would otherwise accept incomplete output.
       if (mounted) {
+        final autoRejecting = errored && _diffVisible;
+        if (autoRejecting) {
+          // Match _rejectDiff: clear highlight and prevent accepting partial output.
+          _snapshotTab.controller.clearEditTarget();
+          _snapshotTabId = null;
+        }
         setState(() {
           _aiStreaming = false;
-          if (!_diffVisible) {
-            _editorReadOnly = false;
-          }
+          if (autoRejecting) _diffVisible = false;
+          if (!_diffVisible) _editorReadOnly = false;
         });
+        if (autoRejecting) _editorFocusNode.requestFocus();
       }
     }
   }
