@@ -26,6 +26,10 @@ class PiProvider implements AiProvider {
 
   Process? _process;
 
+  // In-flight spawn shared by concurrent _ensureRunning callers.
+  // Cleared on success/error so a failed cold start can retry.
+  Future<void>? _starting;
+
   // Persistent subscription forwarding stdout lines to the per-invocation
   // controller. Created at spawn time, cancelled only in dispose() or on error.
   StreamSubscription<String>? _stdoutSub;
@@ -327,9 +331,14 @@ class PiProvider implements AiProvider {
   // ── Internals ───────────────────────────────────────────────────────────────
 
   /// Spawns Pi if it is not already running; returns immediately if warm.
+  /// Safe under concurrent callers — see [_starting].
   Future<void> _ensureRunning() async {
     if (_process != null) return;
+    _starting ??= _spawnProcess().whenComplete(() => _starting = null);
+    await _starting;
+  }
 
+  Future<void> _spawnProcess() async {
     final Process proc;
     try {
       proc = await Process.start(
