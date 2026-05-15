@@ -536,9 +536,9 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // ── Model fetching ──────────────────────────────────────────────────────────
 
-  /// Fetches models for the active provider if not already cached. Runs async
-  /// and updates state when complete. Silent on error (submit still works).
-  void _fetchModelsForActiveProvider() {
+  /// Fetches models for the active provider if not already cached.
+  /// Fire-and-forget from callers; silent on error because submit still works.
+  Future<void> _fetchModelsForActiveProvider() async {
     final key = _selectedProviderKey;
 
     // Already cached — apply and seed.
@@ -552,19 +552,17 @@ class _EditorScreenState extends State<EditorScreen> {
     if (_modelsLoading) return;
     setState(() => _modelsLoading = true);
 
-    _activeProvider
-        .fetchModels()
-        .then((result) {
-          if (!mounted || _selectedProviderKey != key) return;
-          _modelCache[key] = result.models;
-          _fetchResultCache[key] = result;
-          _applyCachedModels(key, result.models, result);
-        })
-        .catchError((_) {
-          if (mounted && _selectedProviderKey == key) {
-            setState(() => _modelsLoading = false);
-          }
-        });
+    try {
+      final result = await _activeProvider.fetchModels();
+      if (!mounted || _selectedProviderKey != key) return;
+      _modelCache[key] = result.models;
+      _fetchResultCache[key] = result;
+      _applyCachedModels(key, result.models, result);
+    } catch (_) {
+      if (mounted && _selectedProviderKey == key) {
+        setState(() => _modelsLoading = false);
+      }
+    }
   }
 
   /// Applies a model list and seeds selection from persisted prefs or provider
