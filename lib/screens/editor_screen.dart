@@ -904,7 +904,13 @@ class _EditorScreenState extends State<EditorScreen> {
       }
 
       if (_shouldExitOnCloseTab(index)) {
-        widget.onExitRequested();
+        // Kill child processes before exit. main.dart's _exitApplication calls
+        // exit(0), which bypasses the dispose chain — without this, the warm Pi
+        // (Node) process is orphaned on Windows (no parent job object).
+        for (final p in _providers.values) {
+          await p.dispose();
+        }
+        await widget.onExitRequested();
         return;
       }
 
