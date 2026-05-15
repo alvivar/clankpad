@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 class NewTabIntent extends Intent {
@@ -48,3 +49,24 @@ class MoveLineUpIntent extends Intent {
 class MoveLineDownIntent extends Intent {
   const MoveLineDownIntent();
 }
+
+/// App-level Ctrl shortcuts blocked while an AI overlay is focused.
+/// Add new app-level shortcuts here so prompt/diff interactions stay inert.
+const Map<ShortcutActivator, Intent> aiOverlayBlockedShortcuts = {
+  SingleActivator(LogicalKeyboardKey.keyN, control: true):
+      DoNothingAndStopPropagationIntent(),
+  SingleActivator(LogicalKeyboardKey.keyW, control: true):
+      DoNothingAndStopPropagationIntent(),
+  SingleActivator(LogicalKeyboardKey.keyO, control: true):
+      DoNothingAndStopPropagationIntent(),
+  SingleActivator(LogicalKeyboardKey.keyS, control: true):
+      DoNothingAndStopPropagationIntent(),
+  SingleActivator(LogicalKeyboardKey.keyS, control: true, shift: true):
+      DoNothingAndStopPropagationIntent(),
+  SingleActivator(LogicalKeyboardKey.keyK, control: true):
+      DoNothingAndStopPropagationIntent(),
+  SingleActivator(LogicalKeyboardKey.keyF, control: true):
+      DoNothingAndStopPropagationIntent(),
+  SingleActivator(LogicalKeyboardKey.tab, control: true):
+      DoNothingAndStopPropagationIntent(),
+};

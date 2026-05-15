@@ -36,25 +36,11 @@ class AiDiffView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Shortcuts(
       shortcuts: const {
-        // ── Diff actions ──────────────────────────────────────────────────
         SingleActivator(LogicalKeyboardKey.enter, control: true):
             AcceptDiffIntent(),
         SingleActivator(LogicalKeyboardKey.backspace, control: true):
             RejectDiffIntent(),
-
-        // ── Block app-level shortcuts (same list as AiPromptPopup) ────────
-        SingleActivator(LogicalKeyboardKey.keyN, control: true):
-            DoNothingAndStopPropagationIntent(),
-        SingleActivator(LogicalKeyboardKey.keyW, control: true):
-            DoNothingAndStopPropagationIntent(),
-        SingleActivator(LogicalKeyboardKey.keyO, control: true):
-            DoNothingAndStopPropagationIntent(),
-        SingleActivator(LogicalKeyboardKey.keyS, control: true):
-            DoNothingAndStopPropagationIntent(),
-        SingleActivator(LogicalKeyboardKey.keyS, control: true, shift: true):
-            DoNothingAndStopPropagationIntent(),
-        SingleActivator(LogicalKeyboardKey.keyK, control: true):
-            DoNothingAndStopPropagationIntent(),
+        ...aiOverlayBlockedShortcuts,
       },
       child: Actions(
         actions: {

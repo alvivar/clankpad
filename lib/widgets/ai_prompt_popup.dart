@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../models/intents.dart';
+
 /// Snapshot of model/thinking state passed from EditorScreen to the popup.
 /// Kept as a data class so the popup receives a single param instead of many.
 class AiModelSettings {
@@ -125,24 +127,7 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
     final modelSupportsThinking = effectiveModel?['reasoning'] == true;
 
     return Shortcuts(
-      shortcuts: const {
-        SingleActivator(LogicalKeyboardKey.keyN, control: true):
-            DoNothingAndStopPropagationIntent(),
-        SingleActivator(LogicalKeyboardKey.keyW, control: true):
-            DoNothingAndStopPropagationIntent(),
-        SingleActivator(LogicalKeyboardKey.keyO, control: true):
-            DoNothingAndStopPropagationIntent(),
-        SingleActivator(LogicalKeyboardKey.keyS, control: true):
-            DoNothingAndStopPropagationIntent(),
-        SingleActivator(LogicalKeyboardKey.keyS, control: true, shift: true):
-            DoNothingAndStopPropagationIntent(),
-        SingleActivator(LogicalKeyboardKey.keyK, control: true):
-            DoNothingAndStopPropagationIntent(),
-        SingleActivator(LogicalKeyboardKey.keyF, control: true):
-            DoNothingAndStopPropagationIntent(),
-        SingleActivator(LogicalKeyboardKey.tab, control: true):
-            DoNothingAndStopPropagationIntent(),
-      },
+      shortcuts: aiOverlayBlockedShortcuts,
       child: Align(
         alignment: Alignment.topCenter,
         child: Padding(
