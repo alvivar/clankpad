@@ -211,45 +211,82 @@ class EditorState extends ChangeNotifier {
   // User-facing notices (missing files, etc.) are stored internally and
   // consumed by EditorScreen via takeStartupNotices().
   Future<void> restoreFromSession(Map<String, dynamic> json) async {
-    _nextTabId = (json['nextTabId'] as int?) ?? _nextTabId;
-    _untitledCounter = (json['untitledCounter'] as int?) ?? _untitledCounter;
-    final storedActiveIndex = (json['activeTabIndex'] as int?) ?? 0;
+    // Outer try guards top-level shape mismatches (e.g. `tabs: "oops"`,
+    // `providerPrefs: 42`, `nextTabId: "hi"`). The contract is that a
+    // parseable-but-malformed session.json never blocks startup — on any
+    // unhandled cast we reset to the constructor-equivalent initial state
+    // (one untitled tab) and surface a notice.
+    try {
+      _nextTabId = (json['nextTabId'] as int?) ?? _nextTabId;
+      _untitledCounter = (json['untitledCounter'] as int?) ?? _untitledCounter;
+      final storedActiveIndex = (json['activeTabIndex'] as int?) ?? 0;
 
-    lastProviderKey = json['lastProviderKey'] as String?;
+      lastProviderKey = json['lastProviderKey'] as String?;
 
-    // Restore per-provider prefs from the current session format.
-    final prefsJson = json['providerPrefs'] as Map<String, dynamic>?;
-    if (prefsJson != null) {
-      providerPrefs = prefsJson.map(
-        (k, v) => MapEntry(k, Map<String, String>.from(v as Map)),
+      // Restore per-provider prefs from the current session format.
+      final prefsJson = json['providerPrefs'] as Map<String, dynamic>?;
+      if (prefsJson != null) {
+        providerPrefs = prefsJson.map(
+          (k, v) => MapEntry(k, Map<String, String>.from(v as Map)),
+        );
+      }
+
+      // Dispose the initial tab created by the constructor.
+      for (final tab in _tabs) {
+        tab.dispose();
+      }
+      _tabs.clear();
+
+      final notices = <String>[];
+      final rawTabs = (json['tabs'] as List?) ?? [];
+
+      // Per-tab try/catch so one malformed entry doesn't drop the whole
+      // session. Missing-key cases are still handled by _restoreTab defaults;
+      // this only catches type-cast failures at the entry level.
+      for (final raw in rawTabs) {
+        try {
+          final tab = await _restoreTab(raw as Map<String, dynamic>, notices);
+          if (tab != null) _tabs.add(tab);
+        } catch (e) {
+          debugPrint('Skipping malformed tab in session: $e');
+          notices.add('Skipped a malformed tab from the previous session.');
+        }
+      }
+
+      // Post-restore fixup 1: enforce "at least one tab" invariant.
+      if (_tabs.isEmpty) {
+        _addUntitledTab();
+      }
+
+      // Post-restore fixup 2: clamp activeTabIndex after min-1 is guaranteed.
+      _activeTabIndex = storedActiveIndex.clamp(0, _tabs.length - 1);
+
+      _startupNotices
+        ..clear()
+        ..addAll(notices);
+    } catch (e) {
+      debugPrint('Session restore failed: $e');
+      _resetToInitialState();
+      _startupNotices.add(
+        'Session file was malformed — starting with a fresh tab.',
       );
     }
+  }
 
-    // Dispose the initial tab created by the constructor.
+  // Mirrors the constructor's initial state. Used by the outer catch in
+  // restoreFromSession when a malformed session.json poisons partial restore.
+  void _resetToInitialState() {
     for (final tab in _tabs) {
       tab.dispose();
     }
     _tabs.clear();
-
-    final notices = <String>[];
-    final rawTabs = (json['tabs'] as List?) ?? [];
-
-    for (final raw in rawTabs) {
-      final tab = await _restoreTab(raw as Map<String, dynamic>, notices);
-      if (tab != null) _tabs.add(tab);
-    }
-
-    // Post-restore fixup 1: enforce "at least one tab" invariant.
-    if (_tabs.isEmpty) {
-      _addUntitledTab();
-    }
-
-    // Post-restore fixup 2: clamp activeTabIndex after min-1 is guaranteed.
-    _activeTabIndex = storedActiveIndex.clamp(0, _tabs.length - 1);
-
-    _startupNotices
-      ..clear()
-      ..addAll(notices);
+    _activeTabIndex = 0;
+    _nextTabId = 0;
+    _untitledCounter = 0;
+    lastProviderKey = null;
+    providerPrefs = {};
+    _startupNotices.clear();
+    _addUntitledTab();
   }
 
   Future<EditorTab?> _restoreTab(
