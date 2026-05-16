@@ -90,10 +90,9 @@ class EditorArea extends StatelessWidget {
     final leadingSpaces = _leadingSpacesInTextLine(text, lineStart);
     if (leadingSpaces == 0) return;
 
-    final remove = _spacesToPreviousTabStop(leadingSpaces).clamp(
-      0,
+    final remove = _spacesToPreviousTabStop(
       leadingSpaces,
-    );
+    ).clamp(0, leadingSpaces);
 
     final newText = text.replaceRange(lineStart, lineStart + remove, '');
     final newCaret = caret <= lineStart + remove ? lineStart : caret - remove;
@@ -148,10 +147,9 @@ class EditorArea extends StatelessWidget {
       if (outdent) {
         final line = lines[i];
         final leadingSpaces = _leadingSpacesInLine(line);
-        final remove = _spacesToPreviousTabStop(leadingSpaces).clamp(
-          0,
+        final remove = _spacesToPreviousTabStop(
           leadingSpaces,
-        );
+        ).clamp(0, leadingSpaces);
         if (remove == 0) continue;
         lines[i] = line.substring(remove);
         edits.add((pos, remove, 0));
@@ -186,7 +184,9 @@ class EditorArea extends StatelessWidget {
 
     final newText = lines.join('\n');
     final newBase = mapOffset(selection.baseOffset).clamp(0, newText.length);
-    final newExtent = mapOffset(selection.extentOffset).clamp(0, newText.length);
+    final newExtent = mapOffset(
+      selection.extentOffset,
+    ).clamp(0, newText.length);
 
     controller.value = TextEditingValue(
       text: newText,
@@ -243,7 +243,7 @@ class EditorArea extends StatelessWidget {
     return rem == 0 ? _tabSize : rem;
   }
 
-  static String _spaces(int count) => List.filled(count, ' ').join();
+  static String _spaces(int count) => ' ' * count;
 
   static List<int> _lineStarts(String text) {
     final starts = <int>[0];
