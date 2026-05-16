@@ -1,5 +1,5 @@
 name: clankpad
-description: "A new Flutter project."
+description: "A minimalist multi-tab desktop text editor with inline AI edits."
 publish_to: 'none'
 version: 0.1.0+1
 
