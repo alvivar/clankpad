@@ -426,9 +426,7 @@ Top-level keys:
 - `untitledCounter` (int)
 - `tabs` (list)
 - `lastProviderKey` (string, optional) — last AI provider key (`pi` / `claude_code`)
-- `lastModelProvider` (string, optional) — last AI model provider selected by the user
-- `lastModelId` (string, optional) — last AI model ID selected by the user
-- `lastThinkingLevel` (string, optional) — last thinking level selected by the user (`off` / `low` / `medium` / `high`)
+- `providerPrefs` (object, optional) — per-provider model and thinking-level preferences, keyed by provider key. Each value is an object `{modelProvider, modelId, thinkingLevel}` where `thinkingLevel` is one of `off` / `low` / `medium` / `high`. Persisting per provider lets each backend's choice survive provider switching within a session.
 
 Per-tab entry keys:
 
@@ -453,9 +451,18 @@ Example:
   "nextTabId": 6,
   "untitledCounter": 4,
   "lastProviderKey": "pi",
-  "lastModelProvider": "anthropic",
-  "lastModelId": "claude-sonnet-4-20250514",
-  "lastThinkingLevel": "medium",
+  "providerPrefs": {
+    "pi": {
+      "modelProvider": "anthropic",
+      "modelId": "claude-sonnet-4-20250514",
+      "thinkingLevel": "medium"
+    },
+    "claude_code": {
+      "modelProvider": "anthropic",
+      "modelId": "claude-sonnet-4-5",
+      "thinkingLevel": "off"
+    }
+  },
   "tabs": [
     {
       "id": 3,
@@ -962,24 +969,30 @@ lib/
   main.dart                    # Entry point, app bootstrap, session restore + lifecycle wiring
   models/
     editor_tab.dart            # EditorTab model
+    intents.dart               # Shared Intent classes + blocked-shortcut map for AI overlays
   state/
     editor_state.dart          # EditorState (ChangeNotifier)
   widgets/
     editor_tab_bar.dart        # Horizontally scrollable tab bar
     editor_tab_item.dart       # Individual tab chip; uses ValueListenableBuilder on isDirtyNotifier for ●
     editor_area.dart           # Text area (multiline, word wrap on, vertical scroll)
+    find_bar.dart              # Ctrl+F find toolbar with match navigation
     ai_prompt_popup.dart       # Floating Ctrl+K prompt input (Overlay)
-    ai_diff_view.dart          # Phase 3: inline diff accept/reject overlay
+    ai_diff_view.dart          # Inline AI diff accept/reject overlay
   screens/
     editor_screen.dart         # Main screen: Stack of editor_area + overlays
   services/
-    session_service.dart       # Read/write session.json (debounced 500ms, atomic via .tmp rename)
-    pi_rpc_service.dart        # Phase 3.7: Pi subprocess RPC client — stdin/stdout JSON, text_delta streaming
+    session_service.dart       # Read/write session.json (debounced 500ms async writes, sync flush on exit, atomic via temp-file rename)
+    ai_provider.dart           # AiProvider abstract interface + shared system prompt + typed AiModel
+    pi_provider.dart           # Pi RPC subprocess provider (pi --mode rpc), stdin/stdout JSON, text_delta streaming
+    claude_code_provider.dart  # Claude Code CLI provider (claude -p --output-format stream-json)
 ```
 
 ---
 
 ## Appendix F — Development phase log (historical)
+
+> Historical entries preserve the file names, class names, and schema field names used at the time of each phase. Current architecture is described in §1–§5 and Appendices A–E above.
 
 ### Phase 1 — Core (MVP)
 
