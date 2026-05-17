@@ -1,8 +1,5 @@
-/// Line-level diff for the AI edit overlay.
-///
-/// Pure Dart, no Flutter dependency. Feeds the unified diff renderer in
-/// `lib/widgets/ai_diff_view.dart`.
-library;
+// Line-level diff for the AI edit overlay. Pure Dart, no Flutter dependency.
+// Feeds the unified diff renderer in `lib/widgets/ai_diff_view.dart`.
 
 enum DiffKind { keep, delete, insert }
 
@@ -11,30 +8,23 @@ enum DiffKind { keep, delete, insert }
 /// we want for tests.
 typedef DiffOp = ({DiffKind kind, String line});
 
-/// Splits a string into lines for comparison, treating the empty string as
-/// zero lines and normalising CRLF / CR endings to LF.
+/// Splits a string into lines for diff comparison.
 ///
-/// Without the empty-string guard, `''.split('\n') == ['']` would inject a
-/// phantom empty line into every insert-mode diff.
-///
-/// Without normalisation, a CRLF original (typical for files opened from a
-/// Windows-saved file) would never match the LF-only text streamed back by
-/// the AI — every “unchanged” line would look modified because of a trailing
-/// `\r`. Stripping CR is purely a display/comparison concern; the editor's
-/// underlying text buffer is untouched.
+/// - Empty input → no lines (avoids Dart's `''.split('\n') == ['']` trap).
+/// - CRLF and lone CR normalised to LF so Windows-loaded originals match the
+///   LF-only stream from the AI. Comparison-only; editor buffer untouched.
 List<String> _lines(String s) => s.isEmpty
     ? const []
     : s.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n');
 
-/// Returns a unified line-level diff of [before] vs [after].
+/// Unified line-level diff of [before] vs [after].
 ///
-/// Uses LCS dynamic programming: O(N·M) time and memory. For our scale
-/// (selections up to a few hundred lines) this stays well under a frame
-/// budget even when recomputed on every streamed chunk. Above ~1000 lines,
-/// expect visible jank; swap to Myers O(ND) at that point.
+/// LCS dynamic programming, O(N·M). Comfortable for selections of a few
+/// hundred lines, even recomputed every streamed chunk. Above ~1000 lines
+/// expect jank; swap to Myers O(ND) then.
 ///
-/// Op ordering at a divergence point: deletes precede inserts, matching
-/// `diff -u` and `git diff` conventions.
+/// At a divergence point, deletes precede inserts (`diff -u` / `git diff`
+/// convention).
 List<DiffOp> diffLines(String before, String after) {
   final a = _lines(before);
   final b = _lines(after);
@@ -42,23 +32,26 @@ List<DiffOp> diffLines(String before, String after) {
   final m = b.length;
 
   // Flat (n+1) × (m+1) LCS table: dp[i*w + j] = LCS length of a[..i], b[..j].
-  // Flat List<int> avoids the nested-list allocation overhead; reaching for
-  // Int32List would be premature for the sizes we handle.
+  // Flat List<int> avoids nested-list allocation overhead; Int32List would
+  // be premature for the sizes we handle.
   final w = m + 1;
   final dp = List<int>.filled((n + 1) * w, 0);
   for (var i = 1; i <= n; i++) {
     for (var j = 1; j <= m; j++) {
-      dp[i * w + j] = a[i - 1] == b[j - 1]
-          ? dp[(i - 1) * w + (j - 1)] + 1
-          : (dp[(i - 1) * w + j] >= dp[i * w + (j - 1)]
-                ? dp[(i - 1) * w + j]
-                : dp[i * w + (j - 1)]);
+      final idx = i * w + j;
+      if (a[i - 1] == b[j - 1]) {
+        dp[idx] = dp[idx - w - 1] + 1;
+      } else {
+        final up = dp[idx - w];
+        final left = dp[idx - 1];
+        dp[idx] = up >= left ? up : left;
+      }
     }
   }
 
-  // Backtrack from (n, m) to (0, 0), emitting ops in reverse. The tie-break
-  // (strict `>` for "go up") means tied cells fall through to insert; that
-  // places deletes before inserts in forward order.
+  // Backtrack from (n, m) to (0, 0), emitting ops in reverse order.
+  // Tie-break: strict `>` so equal cells fall through to insert, placing
+  // deletes before inserts in forward order.
   final out = <DiffOp>[];
   var i = n, j = m;
   while (i > 0 || j > 0) {
@@ -66,12 +59,16 @@ List<DiffOp> diffLines(String before, String after) {
       out.add((kind: DiffKind.keep, line: a[i - 1]));
       i--;
       j--;
-    } else if (j == 0 || (i > 0 && dp[(i - 1) * w + j] > dp[i * w + (j - 1)])) {
-      out.add((kind: DiffKind.delete, line: a[i - 1]));
-      i--;
     } else {
-      out.add((kind: DiffKind.insert, line: b[j - 1]));
-      j--;
+      final idx = i * w + j;
+      final goUp = j == 0 || (i > 0 && dp[idx - w] > dp[idx - 1]);
+      if (goUp) {
+        out.add((kind: DiffKind.delete, line: a[i - 1]));
+        i--;
+      } else {
+        out.add((kind: DiffKind.insert, line: b[j - 1]));
+        j--;
+      }
     }
   }
   return out.reversed.toList(growable: false);

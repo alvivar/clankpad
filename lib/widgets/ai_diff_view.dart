@@ -184,21 +184,18 @@ class _DiffCard extends StatelessWidget {
 
 // ── Unified diff row ──────────────────────────────────────────────────────────
 
-/// Renders a single diff line: a fixed-width marker column ('+'/'-'/' ') plus
-/// the line content, with a full-row background tint by op kind.
-///
-/// Top-level function, not a widget class: it has no state, no per-instance
-/// configuration, and is called from one place. A class would be ceremony.
+/// Renders a single diff line: marker column plus content, full-row
+/// background tint by op kind.
 Widget _buildDiffRow(BuildContext context, DiffOp op) {
-  final colorScheme = Theme.of(context).colorScheme;
-  final green = _greenLine(context);
+  final theme = Theme.of(context);
+  final colorScheme = theme.colorScheme;
+  // `late` keeps this free for keep/delete rows, which never read it.
+  late final green = theme.brightness == Brightness.dark
+      ? const Color(0xFF81C784) // Material green 300
+      : const Color(0xFF388E3C); // Material green 700
 
   final (marker, fg, bg) = switch (op.kind) {
-    DiffKind.keep => (
-      ' ',
-      colorScheme.onSurfaceVariant,
-      const Color(0x00000000),
-    ),
+    DiffKind.keep => (' ', colorScheme.onSurfaceVariant, Colors.transparent),
     DiffKind.delete => (
       '-',
       colorScheme.error,
@@ -239,13 +236,6 @@ Widget _buildDiffRow(BuildContext context, DiffOp op) {
     ),
   );
 }
-
-/// Green that reads well on both light and dark surfaces. Used for both the
-/// insert marker glyph and the insert-line background tint.
-Color _greenLine(BuildContext context) =>
-    Theme.of(context).brightness == Brightness.dark
-    ? const Color(0xFF81C784) // Material green 300
-    : const Color(0xFF388E3C); // Material green 700
 
 // ── Status chip ───────────────────────────────────────────────────────────────
 
