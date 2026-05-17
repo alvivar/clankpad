@@ -25,17 +25,17 @@ line-level changes inline.
 
 ## Decisions
 
-| # | Question | Decision |
-|---|----------|----------|
-| 1 | Layout for Phase 1 | **Unified only.** Side-by-side deferred to Phase 2 toggle. |
-| 2 | Long runs of unchanged context | **Show all lines, no collapsing.** Be explicit. |
-| 3 | Sizing | **Bigger overlay**, not full modal. Keep lightweight feel. |
-| 4 | Line numbers | **Skip for Phase 1.** |
-| 5 | Diff algorithm | **Plain LCS via DP**, pure Dart, in-house. No new deps. |
-| 6 | Diff granularity | **Line-level only.** Word-level deferred to Phase 2. |
-| 7 | Cache strategy | Memoise by `(editTarget, proposed)` identity in a stateful widget. |
-| 8 | Streaming behaviour | Recompute on every chunk. No throttling unless profiling shows lag. |
-| 9 | Insert mode (empty `editTarget`) | Naturally falls out of LCS — all proposed lines become `insert` ops. Header label switches from "Proposed AI edit" to "Insert". |
+| #   | Question                         | Decision                                                                                                                        |
+| --- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Layout for Phase 1               | **Unified only.** Side-by-side deferred to Phase 2 toggle.                                                                      |
+| 2   | Long runs of unchanged context   | **Show all lines, no collapsing.** Be explicit.                                                                                 |
+| 3   | Sizing                           | **Bigger overlay**, not full modal. Keep lightweight feel.                                                                      |
+| 4   | Line numbers                     | **Skip for Phase 1.**                                                                                                           |
+| 5   | Diff algorithm                   | **Plain LCS via DP**, pure Dart, in-house. No new deps.                                                                         |
+| 6   | Diff granularity                 | **Line-level only.** Word-level deferred to Phase 2.                                                                            |
+| 7   | Cache strategy                   | Memoise by `(editTarget, proposed)` identity in a stateful widget.                                                              |
+| 8   | Streaming behaviour              | Recompute on every chunk. No throttling unless profiling shows lag.                                                             |
+| 9   | Insert mode (empty `editTarget`) | Naturally falls out of LCS — all proposed lines become `insert` ops. Header label switches from "Proposed AI edit" to "Insert". |
 
 ## Architecture
 
@@ -120,7 +120,7 @@ One per `DiffOp`. Renders:
   whole diff column in a single `SelectionArea` (GPT review #6) — lighter than
   per-row `SelectableText` and gives correct cross-line selection.
 - **Background**: full-row tint —
-  - `keep`   → no tint
+  - `keep` → no tint
   - `delete` → red bg (`errorContainer.withValues(alpha: 0.20)`)
   - `insert` → green bg (`_green.withValues(alpha: 0.15)`)
 
@@ -194,11 +194,11 @@ When `editTarget.isEmpty`:
 
 ## Files touched
 
-| File | Change | Est. LOC |
-|------|--------|----------|
-| `lib/services/text_diff.dart` | **new** — LCS line-diff | +60 |
-| `lib/widgets/ai_diff_view.dart` | **rewrite** — unified view + cache + sizing | net ≈ −80 (delete pane plumbing) |
-| `README.md` / feature docs | update user-facing diff description if behavior changes | +small |
+| File                            | Change                                                  | Est. LOC                         |
+| ------------------------------- | ------------------------------------------------------- | -------------------------------- |
+| `lib/services/text_diff.dart`   | **new** — LCS line-diff                                 | +60                              |
+| `lib/widgets/ai_diff_view.dart` | **rewrite** — unified view + cache + sizing             | net ≈ −80 (delete pane plumbing) |
+| `README.md` / feature docs      | update user-facing diff description if behavior changes | +small                           |
 
 No changes to `editor_screen.dart`, providers, or session schema. The widget
 constructor surface stays identical.
@@ -207,8 +207,8 @@ constructor surface stays identical.
 
 1. **Unit test for `diffLines`** (new `test/text_diff_test.dart`):
    - empty before → all inserts
-   - empty after  → all deletes
-   - identical    → all keeps
+   - empty after → all deletes
+   - identical → all keeps
    - single line changed in middle of long unchanged region → 1 delete + 1
      insert flanked by keeps
    - multiple disjoint hunks
@@ -232,6 +232,7 @@ constructor surface stays identical.
 ## Estimated effort
 
 ~1 focused pass:
+
 - 20 min `text_diff.dart` + unit tests
 - 30 min `ai_diff_view.dart` rewrite
 - 10 min sizing & manual smoke test
