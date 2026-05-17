@@ -30,74 +30,80 @@ from PIL import Image
 # The face IS the pad.
 # ---------------------------------------------------------------------------
 
-# 32x32 base grid. Used for all sizes >= 32 via nearest-neighbour upscale,
-# and as the source for non-standard intermediate sizes.
+# 32x32 base grid. Concept: a notepad with a small bot head emerging from
+# the top edge like a bookmark tab. The pad dominates the silhouette (~75%
+# of the canvas); the bot is a personality cue, not the subject. Three
+# ink-blue text strokes on the cream paper face suggest writing in progress
+# (long, medium, short — ragged-right). Used for all sizes >= 32 via
+# nearest-neighbour upscale.
 GRID = """\
+................................
 ................................
 ...............AA...............
 ...............KK...............
 ...............KK...............
-....KKKKKKKKKKKKKKKKKKKKKKKK....
-....KBBBBBBBBBBBBBBBBBBBBBBK....
-....KBBBBBBBBBBBBBBBBBBBBBBK....
-....KBBBBBBBBBBBBBBBBBBBBBBK....
-....KBBBKKKKKKKKKKKKKKKKBBBK....
-....KBBBKPPPPPPPPPPPPPPKBBBK....
-....KBBBKPLLLLLLLLLLLPPKBBBK....
-....KBBBKPPPPPPPPPPPPPPKBBBK....
-....KBBBKPLLLLLLLLLPPPPKBBBK....
-..KKKBBBKPPPPPPPPPPPPPPKBBBKKK..
-..KKKBBBKPLLLLLLLLLLLLPKBBBKKK..
-....KBBBKPPPPPPPPPPPPPPKBBBK....
-....KBBBKPLLLLLLLLPPPPPKBBBK....
-....KBBBKPPPPPPPPPPPPPPKBBBK....
-....KBBBKPPPPPPPPPPPPPPKBBBK....
-....KBBBKKKKKKKKKKKKKKKKBBBK....
-....KBBBBBBBBBBBBBBBBBBBBBBK....
-....KBBBBBBBBBBBBBBBBBBBBBBK....
-....KBBBBBBBBBBBBBBBBBBBBBBK....
-....KKKKKKKKKKKKKKKKKKKKKKKK....
+..........KKKKKKKKKKKK..........
+..........KBBBBBBBBBBK..........
+..........KBBEEBBEEBBK..........
+..........KBBEEBBEEBBK..........
+..........KBBBBBBBBBBK..........
 ..KKKKKKKKKKKKKKKKKKKKKKKKKKKK..
-..KBBBBBBBBBBBBBBBBBBBBBBBBBBK..
-..KBBBBBBBBBBBBBBBBBBBBBBBBBBK..
-..KBBBBBBBBBBBBBBBBBBBBBBBBBBK..
-..KBBBBBBBBBBBBBBBBBBBBBBBBBBK..
+..KPPPPPPPPPPPPPPPPPPPPPPPPPPK..
+..KPPPPPPPPPPPPPPPPPPPPPPPPPPK..
+..KPPLLLLLLLLLLLLLLLLLLLLLPPPK..
+..KPPLLLLLLLLLLLLLLLLLLLLLPPPK..
+..KPPPPPPPPPPPPPPPPPPPPPPPPPPK..
+..KPPPPPPPPPPPPPPPPPPPPPPPPPPK..
+..KPPPPPPPPPPPPPPPPPPPPPPPPPPK..
+..KPPLLLLLLLLLLLLLLLLLLLPPPPPK..
+..KPPLLLLLLLLLLLLLLLLLLLPPPPPK..
+..KPPPPPPPPPPPPPPPPPPPPPPPPPPK..
+..KPPPPPPPPPPPPPPPPPPPPPPPPPPK..
+..KPPPPPPPPPPPPPPPPPPPPPPPPPPK..
+..KPPLLLLLLLLLLLLPPPPPPPPPPPPK..
+..KPPLLLLLLLLLLLLPPPPPPPPPPPPK..
+..KPPPPPPPPPPPPPPPPPPPPPPPPPPK..
+..KPPPPPPPPPPPPPPPPPPPPPPPPPPK..
+..KPPPPPPPPPPPPPPPPPPPPPPPPPPK..
 ..KKKKKKKKKKKKKKKKKKKKKKKKKKKK..
+................................
 ................................
 ................................
 """
 
 PALETTE = {
-    ".": (0, 0, 0, 0),
-    "K": (0x1E, 0x1E, 0x22, 255),
-    "B": (0x2D, 0x2D, 0x34, 255),
-    "P": (0xF3, 0xEA, 0xD0, 255),
-    "L": (0x2A, 0x5A, 0x87, 255),
-    "A": (0xD9, 0x4A, 0x44, 255),
+    ".": (0, 0, 0, 0),         # transparent
+    "K": (0x1E, 0x1E, 0x22, 255),  # charcoal: outline + dark body
+    "B": (0x2D, 0x2D, 0x34, 255),  # slate: body fill (slight depth)
+    "P": (0xF3, 0xEA, 0xD0, 255),  # cream: pad paper
+    "L": (0x2A, 0x5A, 0x87, 255),  # ink blue: text strokes
+    "A": (0xD9, 0x4A, 0x44, 255),  # red: antenna LED
+    "E": (0x9B, 0xD6, 0xE1, 255),  # pale cyan: eye glow
 }
 
-# Hand-drawn 16x16 variant. A straight 32->16 nearest-neighbour downscale
-# drops every other pixel and destroys the face-screen text lines, which is
-# the whole point of the design. This smaller redraw keeps the notepad face
-# legible at taskbar-small-mode size by simplifying: no side bolts, fewer
-# text lines, single-pixel antenna stem.
+# Hand-drawn 16x16 variant. A 32->16 nearest-neighbour downscale would lose
+# eye separation (the two 2x2 eyes collapse into one bar) and drop the text
+# strokes to single-pixel fragments. This smaller redraw keeps the design
+# intent at taskbar-small-mode size: pad still dominates, bot head still
+# pokes up as a tab, but everything is reduced to the essentials — single
+# pixel eyes, single pixel antenna, two text strokes instead of three.
 GRID_16 = """\
-........A.......
-........K.......
+................
+.......A........
+.......K........
+....KKKKKKK.....
+....KEBBBEK.....
 ..KKKKKKKKKKKK..
-..KBBBBBBBBBBK..
-..KBPPPPPPPPBK..
-..KBPLLLLLLPBK..
-..KBPPPPPPPPBK..
-..KBPLLLLPPPBK..
-..KBPPPPPPPPBK..
-..KBPLLLLLPPBK..
-..KBPPPPPPPPBK..
+..KPPPPPPPPPPK..
+..KPLLLLLLLLPK..
+..KPLLLLLLLLPK..
+..KPPPPPPPPPPK..
+..KPLLLLLPPPPK..
+..KPLLLLLPPPPK..
+..KPPPPPPPPPPK..
+..KPPPPPPPPPPK..
 ..KKKKKKKKKKKK..
-.KKKKKKKKKKKKKK.
-.KBBBBBBBBBBBBK.
-.KBBBBBBBBBBBBK.
-.KKKKKKKKKKKKKK.
+................
 """
 
 # Standard Windows icon sizes embedded in the .ico.
