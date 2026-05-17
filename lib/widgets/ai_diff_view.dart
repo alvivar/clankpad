@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/intents.dart';
+import '../services/text_diff.dart';
 
 /// Inline diff overlay shown after the AI returns a result.
 ///
-/// Displays the original [editTarget] alongside the [proposed] replacement so
-/// the user can review before committing. Keyboard shortcuts per spec:
+/// Renders a unified line-level diff (`git diff` style) of the original
+/// [editTarget] against the [proposed] replacement: deletes in red, inserts in
+/// green, unchanged context shown in full. Keyboard shortcuts per spec:
 ///   Accept → Ctrl+Enter
 ///   Reject → Ctrl+Backspace
 ///
@@ -56,21 +58,26 @@ class AiDiffView extends StatelessWidget {
         // focus to _editorFocusNode after accept / reject.
         child: Focus(
           focusNode: focusNode,
+          // Larger card than the previous 680×420 cap: a meaningful diff often
+          // exceeded those bounds and was cut off. LayoutBuilder + SizedBox
+          // gives a consistent "bigger overlay" feel sized to the editor area
+          // rather than a fixed pixel cap. Tight (not max-only) constraints so
+          // the inner Expanded scroll region has a bounded height.
           child: Align(
             alignment: Alignment.topCenter,
             child: Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                  maxWidth: 680,
-                  maxHeight: 420,
-                ),
-                child: _DiffCard(
-                  editTarget: editTarget,
-                  proposed: proposed,
-                  isStreaming: isStreaming,
-                  onAccept: onAccept,
-                  onReject: onReject,
+              padding: const EdgeInsets.only(top: 24),
+              child: LayoutBuilder(
+                builder: (context, c) => SizedBox(
+                  width: c.maxWidth * 0.90,
+                  height: c.maxHeight * 0.85,
+                  child: _DiffCard(
+                    editTarget: editTarget,
+                    proposed: proposed,
+                    isStreaming: isStreaming,
+                    onAccept: onAccept,
+                    onReject: onReject,
+                  ),
                 ),
               ),
             ),
@@ -101,13 +108,16 @@ class _DiffCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isInsert = editTarget.isEmpty;
+    // Recomputed on every parent rebuild — i.e. once per streamed chunk.
+    // O(N·M) LCS; cheap for our scale. See `lib/services/text_diff.dart`.
+    final ops = diffLines(editTarget, proposed);
 
     return Material(
       elevation: 6,
       borderRadius: BorderRadius.circular(8),
       color: colorScheme.surfaceContainerHigh,
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Header
@@ -116,7 +126,7 @@ class _DiffCard extends StatelessWidget {
             child: Row(
               children: [
                 Text(
-                  'Proposed AI edit',
+                  isInsert ? 'Insert' : 'Proposed AI edit',
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
@@ -131,56 +141,17 @@ class _DiffCard extends StatelessWidget {
 
           const Divider(height: 1),
 
-          // Side-by-side before/after panes.
-          //
-          // IntrinsicHeight is used intentionally here. The goal is for both
-          // panes to be the same height and for the card to shrink-wrap its
-          // content up to the 420px cap set by the outer ConstrainedBox.
-          // IntrinsicHeight measures the taller pane's content height, which
-          // is then clamped by Flexible's max constraint; each Expanded _DiffPane
-          // receives that capped height, and SingleChildScrollView inside scrolls
-          // when content exceeds it.
-          //
-          // A ConstrainedBox with a fixed max-height on each pane cannot replicate
-          // this: the card would always be at least that tall, even for a two-line
-          // diff. No IntrinsicHeight-free layout simultaneously content-sizes the
-          // card, equalises pane heights, and enables per-pane scrolling.
-          //
-          // Flutter's quadratic-intrinsic-measurement warning applies to trees
-          // where IntrinsicHeight appears inside a scrolling list or other hot
-          // layout path. Here it wraps a static subtree of ~20 nodes, evaluated
-          // once per AI response — the performance impact is negligible.
-          Flexible(
-            child: IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: _DiffPane(
-                      label: 'Before',
-                      text: editTarget,
-                      labelColor: colorScheme.error,
-                      backgroundColor: colorScheme.errorContainer.withValues(
-                        alpha: 0.25,
-                      ),
-                    ),
-                  ),
-                  VerticalDivider(
-                    width: 1,
-                    thickness: 1,
-                    color: colorScheme.outlineVariant,
-                  ),
-                  Expanded(
-                    child: _DiffPane(
-                      label: 'After',
-                      text: proposed,
-                      labelColor: _greenColor(context),
-                      backgroundColor: _greenColor(
-                        context,
-                      ).withValues(alpha: 0.10),
-                    ),
-                  ),
-                ],
+          // Unified diff body. A single SelectionArea wraps the whole list so
+          // text selection works across rows without per-row SelectableText
+          // overhead (which would also break cross-line selection).
+          Expanded(
+            child: SelectionArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [for (final op in ops) _buildDiffRow(context, op)],
+                ),
               ),
             ),
           ),
@@ -209,15 +180,74 @@ class _DiffCard extends StatelessWidget {
       ),
     );
   }
-
-  // Returns a green that works in both light and dark themes.
-  static Color _greenColor(BuildContext context) {
-    final brightness = Theme.of(context).brightness;
-    return brightness == Brightness.dark
-        ? const Color(0xFF81C784) // Material green 300
-        : const Color(0xFF388E3C); // Material green 700
-  }
 }
+
+// ── Unified diff row ──────────────────────────────────────────────────────────
+
+/// Renders a single diff line: a fixed-width marker column ('+'/'-'/' ') plus
+/// the line content, with a full-row background tint by op kind.
+///
+/// Top-level function, not a widget class: it has no state, no per-instance
+/// configuration, and is called from one place. A class would be ceremony.
+Widget _buildDiffRow(BuildContext context, DiffOp op) {
+  final colorScheme = Theme.of(context).colorScheme;
+  final green = _greenLine(context);
+
+  final (marker, fg, bg) = switch (op.kind) {
+    DiffKind.keep => (
+      ' ',
+      colorScheme.onSurfaceVariant,
+      const Color(0x00000000),
+    ),
+    DiffKind.delete => (
+      '-',
+      colorScheme.error,
+      colorScheme.errorContainer.withValues(alpha: 0.20),
+    ),
+    DiffKind.insert => ('+', green, green.withValues(alpha: 0.15)),
+  };
+
+  const baseStyle = TextStyle(
+    fontFamily: 'Consolas',
+    fontSize: 13,
+    height: 1.5,
+  );
+
+  return ColoredBox(
+    color: bg,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 16,
+            child: Text(
+              marker,
+              style: baseStyle.copyWith(color: fg, fontWeight: FontWeight.w600),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              op.line,
+              style: baseStyle.copyWith(color: colorScheme.onSurface),
+              softWrap: true,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+/// Green that reads well on both light and dark surfaces. Used for both the
+/// insert marker glyph and the insert-line background tint.
+Color _greenLine(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+    ? const Color(0xFF81C784) // Material green 300
+    : const Color(0xFF388E3C); // Material green 700
+
+// ── Status chip ───────────────────────────────────────────────────────────────
 
 class _StatusChip extends StatelessWidget {
   final bool isStreaming;
@@ -247,67 +277,6 @@ class _StatusChip extends StatelessWidget {
             color: fg,
           ),
         ),
-      ),
-    );
-  }
-}
-
-// ── Single pane ───────────────────────────────────────────────────────────────
-
-class _DiffPane extends StatelessWidget {
-  final String label;
-  final String text;
-  final Color labelColor;
-  final Color backgroundColor;
-
-  const _DiffPane({
-    required this.label,
-    required this.text,
-    required this.labelColor,
-    required this.backgroundColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return ColoredBox(
-      color: backgroundColor,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Pane label
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: labelColor,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ),
-
-          // Scrollable text content
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: SelectableText(
-                text.isEmpty ? '(empty)' : text,
-                style: TextStyle(
-                  fontFamily: 'Consolas',
-                  fontSize: 13,
-                  height: 1.5,
-                  color: text.isEmpty
-                      ? colorScheme.onSurfaceVariant
-                      : colorScheme.onSurface,
-                ),
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
