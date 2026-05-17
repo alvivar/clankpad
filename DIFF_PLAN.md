@@ -46,11 +46,9 @@ Pure-Dart line diff. No Flutter imports. Unit-testable.
 ```dart
 enum DiffKind { keep, delete, insert }
 
-class DiffOp {
-  final DiffKind kind;
-  final String line;   // single line, no trailing newline
-  const DiffOp(this.kind, this.line);
-}
+/// A single line operation in the unified diff. Named record — a class would
+/// be ceremony for two immutable fields with no methods.
+typedef DiffOp = ({DiffKind kind, String line});
 
 /// Computes a line-level diff of [before] vs [after] using LCS DP.
 ///
@@ -78,47 +76,47 @@ For 300 × 300 lines, that’s 90k cell updates per recompute. Streamed at ~30
 chunks/sec that’s 2.7M cell ops/sec — comfortable. Above 1000 lines, expect
 visible jank; swap to Myers O(ND) if it becomes a problem in practice.
 
-Use a flat `Int32List` of size `(N+1)*(M+1)` for the DP table, not
-`List<List<int>>`. Same algorithmic cost, ~2x less memory, contiguous layout,
-less GC pressure when the table is reallocated per streamed chunk.
+Use a plain `List<int>.filled((N+1)*(M+1), 0)` for the DP table, indexed
+manually. Flat is enough — reaching for `Int32List` would be premature
+optimisation for diffs that cap at a few hundred lines.
 
 ### Rewrite: `lib/widgets/ai_diff_view.dart`
 
 Public surface unchanged: same constructor, same shortcuts, same accept /
-reject callbacks. The widget becomes a `StatefulWidget` so we can cache the
-diff result.
+reject callbacks. **Stays `StatelessWidget`** — recompute `diffLines()`
+directly in `build()`. A cache layer would add `StatefulWidget` ceremony to
+save work only on incidental rebuilds (focus / theme), while the structural
+per-chunk cost is unchanged. Not worth it until profiling says otherwise.
 
 ```
-AiDiffView (StatefulWidget)
-├── _AiDiffViewState
-│   ├── _cachedDiff: List<DiffOp>?
-│   ├── _cachedKey: (String, String)?
-│   └── _diff() → recomputes only when key changes
+AiDiffView (StatelessWidget)
 └── build():
-    Material card
-    ├── Header row: title + status chip (unchanged)
-    ├── Divider
-    ├── Expanded
-    │   └── SingleChildScrollView
-    │       └── Column of _DiffLineRow
-    ├── Divider
-    └── Action row: Reject / Accept (unchanged)
+    LayoutBuilder → SizedBox(w * 0.90, h * 0.85)
+    └── Material card
+        ├── Header row: title + status chip (unchanged)
+        ├── Divider
+        ├── Expanded
+        │   └── SelectionArea
+        │       └── SingleChildScrollView
+        │           └── Column of _buildDiffRow(context, op)
+        ├── Divider
+        └── Action row: Reject / Accept (unchanged)
 ```
 
-### `_DiffLineRow` widget
+### `_buildDiffRow(context, op)` helper
 
-One per `DiffOp`. Renders:
+A private top-level function, not a widget class — it has no state, is used in
+one place, and a class would be ceremony. Renders:
 
 ```
 [ marker column ][ content column ]
 ```
 
 - **Marker column**: fixed width (~20 px), shows `+`, `-`, or ` `, coloured.
-  ASCII `-` (not U+2212) per GPT review #4 — matches git, safe for copy / search,
-  no font-fallback surprises.
-- **Content column**: plain `Text`, wrap enabled, monospace, padded. Wrap the
-  whole diff column in a single `SelectionArea` (GPT review #6) — lighter than
-  per-row `SelectableText` and gives correct cross-line selection.
+  ASCII `-`, matching git — safe for copy/search, no font-fallback surprises.
+- **Content column**: plain `Text`, wrap enabled, monospace, padded. The outer
+  `SelectionArea` makes cross-line selection work without per-row
+  `SelectableText` overhead.
 - **Background**: full-row tint —
   - `keep` → no tint
   - `delete` → red bg (`errorContainer.withValues(alpha: 0.20)`)
@@ -152,32 +150,6 @@ Centered alignment unchanged (`Align(alignment: Alignment.topCenter, ...)`
 already in place). Bump the outer top padding from 12 px to ~24 px so the
 larger card has breathing room.
 
-### Caching the diff
-
-Inside `_AiDiffViewState`:
-
-```dart
-List<DiffOp> _diff() {
-  final key = (widget.editTarget, widget.proposed);
-  if (key != _cachedKey) {
-    _cachedKey  = key;
-    _cachedDiff = diffLines(widget.editTarget, widget.proposed);
-  }
-  return _cachedDiff!;
-}
-```
-
-`build()` calls `_diff()` once. Streaming chunk arrival → parent rebuilds
-this widget with a new `proposed` String → Dart record equality on the tuple
-detects the change by value → recompute.
-
-**Note** (GPT review #2): this cache prevents redundant recomputes within a
-single frame (e.g. if `build()` ran twice for an unrelated reason like focus
-change or theme rebuild). It does **not** reduce the per-chunk diff cost —
-that’s structural: every chunk genuinely changes `proposed` and we genuinely
-need a fresh diff. If streaming cost ever becomes a real problem, the
-mitigation is throttling chunk delivery upstream, not caching.
-
 ### Insert mode
 
 When `editTarget.isEmpty`:
@@ -197,7 +169,7 @@ When `editTarget.isEmpty`:
 | File                            | Change                                                  | Est. LOC                         |
 | ------------------------------- | ------------------------------------------------------- | -------------------------------- |
 | `lib/services/text_diff.dart`   | **new** — LCS line-diff                                 | +60                              |
-| `lib/widgets/ai_diff_view.dart` | **rewrite** — unified view + cache + sizing             | net ≈ −80 (delete pane plumbing) |
+| `lib/widgets/ai_diff_view.dart` | **rewrite** — unified view + sizing                     | net ≈ −100 (delete pane plumbing, no cache) |
 | `README.md` / feature docs      | update user-facing diff description if behavior changes | +small                           |
 
 No changes to `editor_screen.dart`, providers, or session schema. The widget
@@ -241,13 +213,33 @@ constructor surface stays identical.
 
 ## GPT review checklist applied
 
+Technical pass:
+
 - [x] #1 Line-split edge case: `_lines()` helper, not raw `split('\n')`.
-- [x] #2 Cache wording clarified — prevents redundant frame rebuilds, does
-      not reduce per-chunk streaming cost.
+- [x] #2 No cache — see style pass below.
 - [x] #3 LCS perf back-of-envelope honest (~90k cells / chunk for 300 lines,
-      fine; jank expected above ~1000 lines). Use flat `Int32List` for DP table.
+      fine; jank expected above ~1000 lines).
 - [x] #4 ASCII `-` marker, not U+2212.
 - [x] #5 `SizedBox(width, height)`, not `ConstrainedBox(maxWidth/maxHeight)`,
       so `Expanded` inside the card behaves.
 - [x] #6 Single outer `SelectionArea` + plain `Text` per row, not per-row
       `SelectableText`.
+
+Style pass (simple / readable / every-line-justified, abstractions only when
+essential):
+
+- [x] `DiffOp` is a `typedef ({DiffKind kind, String line})`, not a class —
+      no methods, no equality contract needed.
+- [x] DP table is plain `List<int>.filled(...)`, not `Int32List` —
+      premature optimisation dropped.
+- [x] `AiDiffView` stays `StatelessWidget`, no diff cache — the cache only
+      saved incidental rebuild work, at the cost of `StatefulWidget` ceremony.
+- [x] Per-row rendering is a private function `_buildDiffRow(context, op)`,
+      not a `_DiffLineRow` widget class — stateless, single call site,
+      class would be ceremony.
+- [x] `text_diff.dart` kept as a separate file — justified for testability
+      and to keep UI free of algorithm code.
+- [x] `_lines()` helper kept — names a non-obvious Dart edge case, used
+      twice, one line.
+- [x] `LayoutBuilder` kept — it’s the idiomatic way to size relative to
+      available constraints; the two multiplications aren’t the cost.
