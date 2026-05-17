@@ -8,7 +8,7 @@ Add a lightweight Markdown preview mode for Clankpad without turning the app int
 
 Wishlist / not implemented.
 
-The previous `SPEC.md` documented this as if it already existed. It has been extracted here as a plan so the README and current docs only describe shipped behavior.
+The archived spec (`docs/archive/SPEC.md`) documented this as if it already existed. It has been extracted here as a plan so the README and current docs only describe shipped behavior.
 
 ## User experience
 

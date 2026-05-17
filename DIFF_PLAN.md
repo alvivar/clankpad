@@ -18,9 +18,9 @@ the audit trail of what was agreed before implementing.
 
 | File                            | Change  | LOC                                                               |
 | ------------------------------- | ------- | ----------------------------------------------------------------- |
-| `lib/services/text_diff.dart`   | **new** | 78                                                                |
+| `lib/services/text_diff.dart`   | **new** | 75                                                                |
 | `test/text_diff_test.dart`      | **new** | 112 (13 tests)                                                    |
-| `lib/widgets/ai_diff_view.dart` | rewrite | 283 (was 314; net −31, but with substantially more functionality) |
+| `lib/widgets/ai_diff_view.dart` | rewrite | 273 (was 314; net −41, but with substantially more functionality) |
 
 - `editor_screen.dart`, providers, session schema: **untouched**. `AiDiffView`
   constructor surface preserved exactly.

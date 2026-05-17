@@ -64,11 +64,11 @@ On Windows and macOS the native runner opens the window centered at about 80% wi
 
 ### Tabs
 
-| Action                                      | Result                    |
-| ------------------------------------------- | ------------------------- |
-| `Ctrl+N` or click **`+`**                   | Open a new empty tab      |
-| Click a tab                                 | Switch to that tab        |
-| `Ctrl+W`, click **`×`**, or middle-click tab | Close a tab               |
+| Action                                       | Result               |
+| -------------------------------------------- | -------------------- |
+| `Ctrl+N` or click **`+`**                    | Open a new empty tab |
+| Click a tab                                  | Switch to that tab   |
+| `Ctrl+W`, click **`×`**, or middle-click tab | Close a tab          |
 
 - File-backed tabs use the file name as their title.
 - New unsaved tabs are named `Untitled N`; the counter increments and is never reused.
@@ -105,21 +105,21 @@ The find bar appears between the tab bar and editor.
 - Navigation wraps around.
 - If the editor has a non-collapsed single-line selection when Find opens, that text pre-fills the query.
 
-| Key                         | Action         |
-| --------------------------- | -------------- |
-| `Enter` / `F3`              | Next match     |
-| `Shift+Enter` / `Shift+F3`  | Previous match |
-| `Escape`                    | Close find bar |
+| Key                        | Action         |
+| -------------------------- | -------------- |
+| `Enter` / `F3`             | Next match     |
+| `Shift+Enter` / `Shift+F3` | Previous match |
+| `Escape`                   | Close find bar |
 
 ---
 
 ### File Operations
 
-| Shortcut       | Action                                                    |
-| -------------- | --------------------------------------------------------- |
-| `Ctrl+O`       | Open a file via the system file picker                    |
-| `Ctrl+S`       | Save the current file; Save As if no path is set          |
-| `Ctrl+Shift+S` | Save As — always asks for a file name/location            |
+| Shortcut       | Action                                           |
+| -------------- | ------------------------------------------------ |
+| `Ctrl+O`       | Open a file via the system file picker           |
+| `Ctrl+S`       | Save the current file; Save As if no path is set |
+| `Ctrl+Shift+S` | Save As — always asks for a file name/location   |
 
 Opening a file:
 
@@ -177,15 +177,15 @@ The edit target is highlighted until the prompt is dismissed or the diff is acce
 
 ### Prompt popup keys
 
-| Key           | Action                                                                            |
-| ------------- | --------------------------------------------------------------------------------- |
-| `Enter`       | Submit prompt                                                                     |
-| `Shift+Enter` | Insert newline in prompt                                                          |
-| `Escape`      | Dismiss popup                                                                     |
-| `↑` / `↓`     | Browse prompt history when cursor is on first/last line                           |
-| `Ctrl+Tab`    | Cycle AI provider                                                                 |
-| `Ctrl+P`      | Cycle model                                                                       |
-| `Shift+Tab`   | Cycle thinking level when the effective model supports reasoning                  |
+| Key           | Action                                                           |
+| ------------- | ---------------------------------------------------------------- |
+| `Enter`       | Submit prompt                                                    |
+| `Shift+Enter` | Insert newline in prompt                                         |
+| `Escape`      | Dismiss popup                                                    |
+| `↑` / `↓`     | Browse prompt history when cursor is on first/last line          |
+| `Ctrl+Tab`    | Cycle AI provider                                                |
+| `Ctrl+P`      | Cycle model                                                      |
+| `Shift+Tab`   | Cycle thinking level when the effective model supports reasoning |
 
 Prompt history is in-memory only and capped at 50 entries.
 
@@ -195,13 +195,13 @@ After submit:
 
 1. The editor becomes read-only.
 2. A thin progress indicator appears below the tab bar.
-3. The AI response streams into a Before / After diff card.
+3. The AI response streams into a unified line-level diff card with `+` / `-` markers and red/green highlighting.
 4. The editor remains locked until you accept or reject.
 
-| Key                  | Action         |
-| -------------------- | -------------- |
-| `Ctrl+Enter`         | Accept AI edit |
-| `Ctrl+Backspace`     | Reject AI edit |
+| Key              | Action         |
+| ---------------- | -------------- |
+| `Ctrl+Enter`     | Accept AI edit |
+| `Ctrl+Backspace` | Reject AI edit |
 
 While loading before the diff opens, `Escape` or the Cancel button aborts the in-flight request. Once the diff opens, reject the diff instead.
 
@@ -213,25 +213,25 @@ If an AI provider fails, Clankpad shows a dismissible error banner and unlocks t
 
 ### App-level
 
-| Shortcut       | Action                          |
-| -------------- | ------------------------------- |
-| `Ctrl+N`       | New tab                         |
-| `Ctrl+W`       | Close active tab                |
-| `Ctrl+O`       | Open file                       |
-| `Ctrl+S`       | Save                            |
-| `Ctrl+Shift+S` | Save As                         |
-| `Ctrl+F`       | Find                            |
-| `Ctrl+K`       | AI inline edit                  |
-| `Alt+↑`        | Move line/block up              |
-| `Alt+↓`        | Move line/block down            |
-| `Escape`       | Cancel AI request before diff   |
+| Shortcut       | Action                        |
+| -------------- | ----------------------------- |
+| `Ctrl+N`       | New tab                       |
+| `Ctrl+W`       | Close active tab              |
+| `Ctrl+O`       | Open file                     |
+| `Ctrl+S`       | Save                          |
+| `Ctrl+Shift+S` | Save As                       |
+| `Ctrl+F`       | Find                          |
+| `Ctrl+K`       | AI inline edit                |
+| `Alt+↑`        | Move line/block up            |
+| `Alt+↓`        | Move line/block down          |
+| `Escape`       | Cancel AI request before diff |
 
 ### Editor-local
 
-| Shortcut    | Action           |
-| ----------- | ---------------- |
+| Shortcut    | Action            |
+| ----------- | ----------------- |
 | `Tab`       | Indent / tab stop |
-| `Shift+Tab` | Outdent          |
+| `Shift+Tab` | Outdent           |
 
 ### AI diff review
 
@@ -255,6 +255,6 @@ If an AI provider fails, Clankpad shows a dismissible error banner and unlocks t
 
 See [`FEATURES.md`](FEATURES.md) for the broader wishlist. Current focused plans include:
 
-- Better AI diff view: [`DIFF_PLAN.md`](DIFF_PLAN.md)
+- AI diff polish — word-level highlighting, side-by-side toggle, and per-hunk accept/reject: [`DIFF_PLAN.md`](DIFF_PLAN.md)
 - Markdown preview: [`docs/plans/markdown-preview.md`](docs/plans/markdown-preview.md)
 - Status bar, find/replace, line numbers, file watcher, and syntax highlighting
