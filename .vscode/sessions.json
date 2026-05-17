@@ -25,6 +25,15 @@
         ]
       },
       {
+        "name": "docs",
+        "icon": "book",
+        "color": "terminal.ansiBrightCyan",
+        "autoExecuteCommands": true,
+        "commands": [
+          "source C:/Users/andre/miniconda3/etc/profile.d/conda.sh && conda activate pi && pi-link docs@clankpad"
+        ]
+      },
+      {
         "name": "committer",
         "icon": "git-commit",
         "color": "terminal.ansiYellow",
