@@ -1,16 +1,25 @@
 # Clankpad
 
-A minimalist, distraction-free text editor with multi-tab support and inline AI editing. Built with Flutter for Windows desktop.
+A minimalist, distraction-free plain-text editor with multi-tab support, hot-exit session restore, find, and inline AI editing. Built with Flutter for desktop, with Windows as the primary target.
 
 ---
 
 ## Requirements
 
 - [Flutter SDK](https://docs.flutter.dev/get-started/install) (Dart SDK ^3.11.0)
-- Windows (primary target; Linux/macOS may work but are untested)
-- _(Optional, for AI features)_ [Node.js](https://nodejs.org/) + [Pi coding agent](https://www.npmjs.com/package/@mariozechner/pi-coding-agent)
-    - Install: `npm install -g @mariozechner/pi-coding-agent`
-    - Authenticate/configure once (e.g. run `pi /login`)
+- Windows (primary target; macOS/Linux runners exist but are less tested)
+- Optional, for AI features:
+  - [Node.js](https://nodejs.org/) + [Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
+  - and/or [Claude Code](https://docs.anthropic.com/claude-code)
+
+Pi setup example:
+
+```bash
+npm install -g @earendil-works/pi-coding-agent
+pi /login
+```
+
+Claude Code must be installed as `claude` on `PATH` and authenticated separately.
 
 ---
 
@@ -32,19 +41,22 @@ flutter build windows
 
 ## Interface Overview
 
-```
+```text
 ┌───────────────────────────────────────────────────────┐
 │  [Untitled 1 ●] [×]  [notes.txt] [×]  [+]   ← scroll  │  ← Tab bar
-├─────────────────────────────────────────────────────  ┤
+├───────────────────────────────────────────────────────┤
+│  Error banner / AI progress / Find bar when visible   │
+├───────────────────────────────────────────────────────┤
 │  ┌─────────────────────────────────────────────┐      │
-│  │  Ctrl+K prompt popup (when active)          │      │  ← AI overlay
+│  │  Ctrl+K prompt popup or AI diff overlay     │      │
 │  └─────────────────────────────────────────────┘      │
 │                                                       │
 │  Text area — fills the rest of the window             │
 │  (vertical scroll, word wrap on)                      │
-│                                                       │
 └───────────────────────────────────────────────────────┘
 ```
+
+On Windows and macOS the native runner opens the window centered at about 80% width × 90% height of the usable screen area.
 
 ---
 
@@ -52,33 +64,52 @@ flutter build windows
 
 ### Tabs
 
-| Action                             | Result                    |
-| ---------------------------------- | ------------------------- |
-| `Ctrl+N` or click **`+`**          | Open a new empty tab      |
-| Click a tab                        | Switch to that tab        |
-| `Ctrl+W` or click **`×`** on a tab | Close the active/that tab |
+| Action                                      | Result                    |
+| ------------------------------------------- | ------------------------- |
+| `Ctrl+N` or click **`+`**                   | Open a new empty tab      |
+| Click a tab                                 | Switch to that tab        |
+| `Ctrl+W`, click **`×`**, or middle-click tab | Close a tab               |
 
-**Tab titles** show the file name. Unsaved (new) tabs are named _Untitled 1_, _Untitled 2_, etc. — the counter always increments and is never reused across the session.
+- File-backed tabs use the file name as their title.
+- New unsaved tabs are named `Untitled N`; the counter increments and is never reused.
+- A dot `●` marks tabs with unsaved changes.
+- The tab bar scrolls horizontally when tabs exceed the available width.
+- Closing the last tab exits the app if that tab is an empty clean untitled tab; otherwise dirty-close rules still apply.
 
-**Dirty indicator** — a dot `●` appears in the tab title whenever the tab has unsaved changes.
+Closing a dirty tab prompts:
 
-**Tab bar scrolling** — when you have more tabs than fit the window width, the tab bar scrolls horizontally.
-
-**Minimum one tab** — closing the last tab automatically opens a fresh empty tab.
-
-**Closing a tab with unsaved changes** prompts a confirmation dialog:
-
-- **Save** — saves (opens _Save As_ if the file has no path), then closes the tab.
-- **Don't Save** — discards changes and closes the tab.
+- **Save** — writes the file, or opens Save As for untitled tabs, then closes.
+- **Don't Save** — discards changes and closes.
 - **Cancel** — keeps the tab open.
 
 ---
 
-### Text Area
+### Text Editing
 
 - Plain text, monospaced font.
-- Word wrap **on** by default; scrolls vertically when content exceeds the window height.
-- Fills all available space below the tab bar.
+- Word wrap is on.
+- Vertical scrolling is enabled.
+- `Tab` indents by 4 spaces; with no selection it inserts spaces to the next tab stop.
+- `Shift+Tab` outdents selected lines or the current line's indentation.
+- `Alt+↑` / `Alt+↓` moves the current line or selected block up/down one line.
+
+---
+
+### Find (`Ctrl+F`)
+
+The find bar appears between the tab bar and editor.
+
+- Search is case-insensitive.
+- Matches update live and are highlighted in the editor.
+- Counter shows `N of M` or `No results`.
+- Navigation wraps around.
+- If the editor has a non-collapsed single-line selection when Find opens, that text pre-fills the query.
+
+| Key                         | Action         |
+| --------------------------- | -------------- |
+| `Enter` / `F3`              | Next match     |
+| `Shift+Enter` / `Shift+F3`  | Previous match |
+| `Escape`                    | Close find bar |
 
 ---
 
@@ -87,140 +118,143 @@ flutter build windows
 | Shortcut       | Action                                                    |
 | -------------- | --------------------------------------------------------- |
 | `Ctrl+O`       | Open a file via the system file picker                    |
-| `Ctrl+S`       | Save the current file (opens _Save As_ if no path is set) |
-| `Ctrl+Shift+S` | Save As — always prompts for a file name/location         |
+| `Ctrl+S`       | Save the current file; Save As if no path is set          |
+| `Ctrl+Shift+S` | Save As — always asks for a file name/location            |
 
-**Opening a file:**
+Opening a file:
 
-- If the active tab is empty and unmodified, the file loads there.
-- Otherwise, it opens in a new tab.
-- If the file is already open in another tab, Clankpad switches to that tab instead of opening a duplicate.
+- If the file is already open, Clankpad switches to the existing tab.
+- If the active tab is empty, untitled, and clean, the file loads there.
+- Otherwise the file opens in a new tab.
 
-**Save errors** (permissions, disk full, locked file, etc.) show a modal error dialog. The tab stays open and dirty — no data is lost silently.
+Save/open errors show a dialog or banner and keep the tab/data intact.
 
 ---
 
 ### Session Persistence (Hot Exit)
 
-Clankpad never loses your work. Every change is saved to a session file automatically.
+Clankpad continuously saves session state so closing the app does not lose work.
 
-- **Auto-save** — the session is saved to disk 500 ms after your last change (debounced), so continuous typing never hammers the disk.
-- **On close** — any pending save is flushed synchronously before the app exits.
-- **On reopen** — all tabs are restored exactly as you left them: content, file paths, and which tab was active.
+- Changes are debounced and written after 500 ms.
+- On app exit, pending session writes are flushed synchronously.
+- On reopen, tabs, file paths, unsaved text, active tab, and AI provider/model preferences are restored.
+- Clean file-backed tabs are re-read from disk.
+- Dirty file-backed tabs restore unsaved content from the session.
+- Missing/deleted files produce a startup notice instead of silently losing content.
 
-**What gets restored:**
+Session file:
 
-| Tab state                          | Restored as                       |
-| ---------------------------------- | --------------------------------- |
-| File-backed, saved (clean)         | Re-read from disk                 |
-| File-backed, unsaved edits (dirty) | Edits and file path both restored |
-| Untitled (no file)                 | Content always restored           |
+```text
+%APPDATA%\Clankpad\session.json
+```
 
-**If a file has moved or been deleted since last session:**
-
-- If the tab had unsaved edits → content is restored from the session; a notice is shown so you can save it to a new location.
-- If the tab was clean (no unsaved edits) → the tab is skipped and a notification is shown.
+On non-Windows platforms the fallback location is `./session.json`.
 
 ---
 
-### Inline AI Edit (`Ctrl+K`)
+## Inline AI Edit (`Ctrl+K`)
 
-A floating prompt popup for AI-assisted text editing, powered by **Pi** (`pi --mode rpc`).
+`Ctrl+K` opens a floating prompt for AI-assisted text editing. Clankpad does not store API keys or call model APIs directly; it shells out to a local AI backend.
 
-Clankpad does **not** talk to model APIs directly and stores no API keys. Pi owns auth + model configuration. For safety, Pi is launched with tools disabled (text-only) — it only sees the current document text and your selected edit target.
+Registered providers:
 
-**AI setup (optional):**
+| Provider    | Backend                                              |
+| ----------- | ---------------------------------------------------- |
+| Pi          | Long-lived `pi --mode rpc` subprocess                |
+| Claude Code | One-shot `claude -p --output-format stream-json` run |
 
-```bash
-npm install -g @mariozechner/pi-coding-agent
-pi /login
-```
+Both providers are launched with a text-editor-specific system prompt. Pi is launched with tools disabled; Claude Code is run without session persistence.
 
-If Pi isn't available (not installed or not on `PATH`), `Ctrl+K` will show a dismissible error banner and the editor remains usable.
+### Edit target behavior
 
-**How to use:**
+When `Ctrl+K` opens, Clankpad snapshots the active tab:
 
-1. **Select text** you want to edit, then press `Ctrl+K` — the AI will transform just that selection.
-2. Press `Ctrl+K` **with no selection** — the AI will work on the entire document.
-3. Type your instruction in the popup (e.g. _"fix the grammar"_, _"make this more formal"_).
-4. Press `Enter` to submit.
+- If text is selected, the AI edits that selection.
+- If there is no selection and the caret is on a non-blank line, the surrounding paragraph is edited.
+- If the caret is on a blank line, the AI output is inserted at the cursor.
 
-**Inside the popup:**
+The edit target is highlighted until the prompt is dismissed or the diff is accepted/rejected.
+
+### Prompt popup keys
 
 | Key           | Action                                                                            |
 | ------------- | --------------------------------------------------------------------------------- |
-| `Enter`       | Submit the prompt                                                                 |
-| `Shift+Enter` | Insert a newline in the prompt                                                    |
-| `Escape`      | Dismiss the popup without making changes                                          |
-| `↑` / `↓`     | Browse prompt history (cursor must be on the first / last line)                   |
-| `Ctrl+P`      | Cycle the model (when the model list is loaded)                                   |
-| `Shift+Tab`   | Cycle thinking level (off → low → medium → high; only shown for reasoning models) |
+| `Enter`       | Submit prompt                                                                     |
+| `Shift+Enter` | Insert newline in prompt                                                          |
+| `Escape`      | Dismiss popup                                                                     |
+| `↑` / `↓`     | Browse prompt history when cursor is on first/last line                           |
+| `Ctrl+Tab`    | Cycle AI provider                                                                 |
+| `Ctrl+P`      | Cycle model                                                                       |
+| `Shift+Tab`   | Cycle thinking level when the effective model supports reasoning                  |
 
-**Model & thinking level:** the popup footer lets you pick an AI model and (for reasoning-capable models) a thinking level. The model list comes from Pi and can be filtered via Pi's `enabledModels` setting (`~/.pi/agent/settings.json`). Model/thinking selection and prompt history are kept in-memory for the current app run.
+Prompt history is in-memory only and capped at 50 entries.
 
-**While the AI request is running**, the editor is locked (read-only). Before the first tokens arrive, a thin progress bar appears below the tab bar with **Cancel (Esc)**.
+### Streaming and review
 
-**Reviewing the result** — the response streams into a “Before / After” diff card:
+After submit:
 
-- Press `Tab` or `Ctrl+Enter` to **accept** the change.
-- Press `Escape` to **reject** and keep the original.
+1. The editor becomes read-only.
+2. A thin progress indicator appears below the tab bar.
+3. The AI response streams into a Before / After diff card.
+4. The editor remains locked until you accept or reject.
 
-The editor stays read-only until you accept or reject.
+| Key                  | Action         |
+| -------------------- | -------------- |
+| `Ctrl+Enter`         | Accept AI edit |
+| `Ctrl+Backspace`     | Reject AI edit |
+
+While loading before the diff opens, `Escape` or the Cancel button aborts the in-flight request. Once the diff opens, reject the diff instead.
+
+If an AI provider fails, Clankpad shows a dismissible error banner and unlocks the editor. If the provider errors after partial diff output, the partial diff is automatically rejected so incomplete output cannot be accepted accidentally.
 
 ---
 
 ## Keyboard Shortcuts
 
-### Global
+### App-level
 
-| Shortcut       | Action           |
-| -------------- | ---------------- |
-| `Ctrl+N`       | New tab          |
-| `Ctrl+W`       | Close active tab |
-| `Ctrl+O`       | Open file        |
-| `Ctrl+S`       | Save             |
-| `Ctrl+Shift+S` | Save As          |
-| `Ctrl+K`       | AI inline edit   |
+| Shortcut       | Action                          |
+| -------------- | ------------------------------- |
+| `Ctrl+N`       | New tab                         |
+| `Ctrl+W`       | Close active tab                |
+| `Ctrl+O`       | Open file                       |
+| `Ctrl+S`       | Save                            |
+| `Ctrl+Shift+S` | Save As                         |
+| `Ctrl+F`       | Find                            |
+| `Ctrl+K`       | AI inline edit                  |
+| `Alt+↑`        | Move line/block up              |
+| `Alt+↓`        | Move line/block down            |
+| `Escape`       | Cancel AI request before diff   |
 
-### Ctrl+K prompt popup
+### Editor-local
 
-| Key           | Action                                           |
-| ------------- | ------------------------------------------------ |
-| `Enter`       | Submit prompt                                    |
-| `Shift+Enter` | Insert newline                                   |
-| `Escape`      | Dismiss popup                                    |
-| `↑` / `↓`     | Prompt history (first / last line only)          |
-| `Ctrl+P`      | Cycle model                                      |
-| `Shift+Tab`   | Cycle thinking level (off → low → medium → high) |
+| Shortcut    | Action           |
+| ----------- | ---------------- |
+| `Tab`       | Indent / tab stop |
+| `Shift+Tab` | Outdent          |
 
 ### AI diff review
 
-| Key                  | Action         |
-| -------------------- | -------------- |
-| `Tab` / `Ctrl+Enter` | Accept AI edit |
-| `Escape`             | Reject AI edit |
-
-> While the progress stripe is visible (before the diff opens), `Escape` cancels the in-flight request.
+| Shortcut         | Action         |
+| ---------------- | -------------- |
+| `Ctrl+Enter`     | Accept AI edit |
+| `Ctrl+Backspace` | Reject AI edit |
 
 ---
 
-## Session File Location
+## Documentation
 
-The session is stored at:
-
-```
-%APPDATA%\Clankpad\session.json
-```
-
-You can delete this file to reset the session (all tabs will be lost).
+- Feature backlog: [`FEATURES.md`](FEATURES.md)
+- Markdown preview plan: [`docs/plans/markdown-preview.md`](docs/plans/markdown-preview.md)
+- Archived implementation spec: [`docs/archive/SPEC.md`](docs/archive/SPEC.md)
+- Vendor references: [`docs/vendor/`](docs/vendor/)
 
 ---
 
 ## What's Coming
 
-- [ ] Window title reflects the active file
-- [ ] No-wrap + horizontal scroll mode (`Alt+Z` toggle)
-- [ ] Native File menu (New, Open, Save, Save As, Exit)
-- [ ] Font size adjustment
-- [ ] Light / dark theme toggle
-- [ ] True inline `Ctrl+K` popup positioning near the cursor
+See [`FEATURES.md`](FEATURES.md) for the broader wishlist. Current focused plans include:
+
+- Better AI diff view: [`DIFF_PLAN.md`](DIFF_PLAN.md)
+- Markdown preview: [`docs/plans/markdown-preview.md`](docs/plans/markdown-preview.md)
+- Status bar, find/replace, line numbers, file watcher, and syntax highlighting

@@ -18,7 +18,7 @@ Things any programmer reaches for instinctively. Their absence creates friction;
 - [ ] **Auto-indent on Enter** — match the indentation of the current line when pressing Enter. Optionally increase indent after `{`, `:`, etc.
 - [ ] **Bracket auto-close** — typing `(`, `[`, `{`, `"`, `'` inserts the matching closer and places the cursor between them. Type the closer to skip past it instead of doubling.
 - [ ] **Smart backspace** — backspace at the start of an indented line removes one indent level (4 spaces) instead of one character. Mirrors Shift+Tab behavior.
-- [ ] **Word wrap toggle (`Alt+Z`)** — switch between soft wrap and horizontal scroll. Already planned in SPEC Phase 4, noting here for completeness.
+- [ ] **Word wrap toggle (`Alt+Z`)** — switch between soft wrap and horizontal scroll.
 
 ---
 
@@ -69,7 +69,7 @@ Features that make Clankpad useful beyond a plain scratchpad — without turning
 - [ ] **Minimap** — a narrow column on the right showing a zoomed-out view of the file. Click to navigate. Useful for orientation in longer files.
 - [ ] **Sticky scroll / breadcrumb** — show the current function/class/section name at the top of the editor when scrolled deep into a file. Requires parsing; could start with indent-based heuristics.
 - [ ] **Diff two tabs** — select two open tabs and see a side-by-side diff. Useful for comparing AI output variations, before/after edits, or two versions of a spec.
-- [ ] **Markdown preview** — side-by-side or toggle for `.md` files. Clankpad is already used for specs and READMEs; rendering them is natural.
+- [ ] **Markdown preview** — side-by-side or toggle for `.md` files. Clankpad is already used for plans and READMEs; rendering them is natural. See `docs/plans/markdown-preview.md`.
 - [ ] **Open containing folder** — right-click tab → "Reveal in Explorer". One click to get to the file's directory.
 - [ ] **Copy file path** — right-click tab → "Copy Path" / "Copy Relative Path". Useful for pasting into terminal commands or AI prompts.
 - [ ] **Encoding handling** — detect file encoding on open (UTF-8, UTF-16, Latin-1). Show in status bar. Allow conversion on save.
@@ -98,9 +98,9 @@ Making Clankpad a first-class citizen on the desktop.
 Small things that compound.
 
 - [ ] **Font size adjustment (`Ctrl+=` / `Ctrl+-`)** — zoom in and out. Persist the setting. `Ctrl+0` resets to default.
-- [ ] **Light / dark / system theme** — already planned in SPEC Phase 4. Follow system preference by default, with manual override.
+- [ ] **Light / dark / system theme toggle** — Clankpad already follows the system theme; add a manual override.
 - [ ] **Auto-save to disk** — optional: automatically write dirty file-backed tabs to disk after N seconds of inactivity. Separate from session persistence. Off by default (some people don't want silent writes), but invaluable when enabled.
-- [ ] **Window title** — show the active file name and path in the title bar. Already planned in SPEC Phase 4. `filename.txt — Clankpad` or `● filename.txt — Clankpad` when dirty.
+- [ ] **Window title** — show the active file name and path in the title bar. `filename.txt — Clankpad` or `● filename.txt — Clankpad` when dirty.
 - [ ] **Zen mode (`F11` or `Ctrl+Shift+F`)** — full-screen with no tab bar, no status bar. Just the text. For focused writing. Escape or same shortcut to exit.
 - [ ] **Distraction-free centering** — in zen mode, constrain the text column to ~80 characters centered in the window. Reduces eye travel on wide monitors.
 - [ ] **Open file type filter memory** — remember the last file type filter used in the open/save dialogs. If you're always opening `.md` files, don't make you scroll past `*.*` every time.
