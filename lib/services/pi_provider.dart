@@ -367,7 +367,7 @@ class PiProvider implements AiProvider {
     } on ProcessException {
       throw AiProviderError(
         '`$piExecutable` not found — install it with '
-        '`npm install -g @mariozechner/pi-coding-agent` and ensure it\'s on PATH.',
+        '`npm install -g @earendil-works/pi-coding-agent` and ensure it\'s on PATH.',
       );
     }
 
