@@ -25,6 +25,15 @@
         ]
       },
       {
+        "name": "icon",
+        "icon": "paintcan",
+        "color": "terminal.ansiBrightRed",
+        "autoExecuteCommands": true,
+        "commands": [
+          "source C:/Users/andre/miniconda3/etc/profile.d/conda.sh && conda activate pi && pi-link icon@clankpad"
+        ]
+      },
+      {
         "name": "docs",
         "icon": "book",
         "color": "terminal.ansiBrightCyan",
