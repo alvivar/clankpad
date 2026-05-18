@@ -1,14 +1,18 @@
-"""Generate Clankpad's Windows app icon as a multi-resolution .ico.
+"""Generate Clankpad's app icon for Windows (.ico) and macOS (PNG set).
 
-The source is a hand-drawn 32x32 pixel-art grid below. It is upscaled
-with nearest-neighbour to the standard Windows icon sizes and packed
-into an .ico with PNG-encoded entries (supported by all modern Windows
-versions).
+The source is a hand-drawn 32x32 pixel-art grid below (with a separate
+16x16 redraw for the smallest taskbar size). Each rendered base size is
+post-processed with a 1px white outline, then upscaled with nearest-
+neighbour to all required target sizes, then either packed into a multi-
+resolution .ico for Windows or written out as PNGs for the macOS asset
+catalog.
 
 Run from repo root:
     python tools/build_icon.py
 
-Output: windows/runner/resources/app_icon.ico
+Outputs:
+    windows/runner/resources/app_icon.ico
+    macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_*.png
 """
 
 import io
@@ -18,35 +22,35 @@ from pathlib import Path
 from PIL import Image
 
 # ---------------------------------------------------------------------------
-# Source pixel art (32x32). One character per pixel.
+# Source pixel art. One character per pixel.
 #
 #   .  transparent          K  charcoal outline / dark body
-#   B  slate body fill      P  cream paper / face screen
-#   L  ink-blue text line   A  red LED antenna tip
+#   B  slate body fill      P  cream paper
+#   L  ink-blue text line   A  cool-yellow LED antenna tip
+#   E  pale cyan eye glow
 #
-# Design: boxy robot head dominates the canvas. Antenna with red LED on top,
-# side bolt-knobs at mid-head, a cream rectangular "face screen" with four
-# ragged ink-blue text lines (notepad pattern), short shoulder block below.
-# The face IS the pad.
+# Concept: a notepad with a small bot head emerging from the top edge like
+# a bookmark tab. The pad dominates the silhouette; the bot is a personality
+# cue, not the subject. Three ink-blue text strokes on the cream paper
+# (long / medium / short, ragged-right) suggest writing in progress. The
+# head's bottom edge is the pad's top edge — one shared K row, not two
+# parallel ones — so the bot reads as perched on the pad, not stacked on it.
+# A 1px white halo is added at render time (see add_outline) so the icon
+# pops off dark backgrounds like the Windows taskbar.
 # ---------------------------------------------------------------------------
 
-# 32x32 base grid. Concept: a notepad with a small bot head emerging from
-# the top edge like a bookmark tab. The pad dominates the silhouette (~75%
-# of the canvas); the bot is a personality cue, not the subject. Three
-# ink-blue text strokes on the cream paper face suggest writing in progress
-# (long, medium, short — ragged-right). Used for all sizes >= 32 via
-# nearest-neighbour upscale.
+# 32x32 base grid. Used for every size >= 24 via nearest-neighbour upscale.
 GRID = """\
 ................................
 ................................
 ...............AA...............
 ...............KK...............
 ...............KK...............
-..........KKKKKKKKKKKK..........
-..........KBBBBBBBBBBK..........
-..........KBBEEBBEEBBK..........
-..........KBBEEBBEEBBK..........
-..........KBBBBBBBBBBK..........
+.........KKKKKKKKKKKKKK.........
+.........KBBBBBBBBBBBBK.........
+.........KBBBEEBBEEBBBK.........
+.........KBBBEEBBEEBBBK.........
+.........KBBBBBBBBBBBBK.........
 ..KKKKKKKKKKKKKKKKKKKKKKKKKKKK..
 ..KPPPPPPPPPPPPPPPPPPPPPPPPPPK..
 ..KPPPPPPPPPPPPPPPPPPPPPPPPPPK..
@@ -72,12 +76,12 @@ GRID = """\
 """
 
 PALETTE = {
-    ".": (0, 0, 0, 0),         # transparent
+    ".": (0, 0, 0, 0),  # transparent
     "K": (0x1E, 0x1E, 0x22, 255),  # charcoal: outline + dark body
     "B": (0x2D, 0x2D, 0x34, 255),  # slate: body fill (slight depth)
     "P": (0xF3, 0xEA, 0xD0, 255),  # cream: pad paper
     "L": (0x2A, 0x5A, 0x87, 255),  # ink blue: text strokes
-    "A": (0xD9, 0x4A, 0x44, 255),  # red: antenna LED
+    "A": (0xEC, 0xD6, 0x51, 255),  # cool yellow: antenna LED
     "E": (0x9B, 0xD6, 0xE1, 255),  # pale cyan: eye glow
 }
 
@@ -106,10 +110,43 @@ GRID_16 = """\
 ................
 """
 
-# Standard Windows icon sizes embedded in the .ico.
-SIZES = [16, 24, 32, 48, 64, 128, 256]
+# Windows .ico embeds these sizes. macOS asset catalog wants a slightly
+# different set (no 24 / 48, adds 512 / 1024). Both share 16, 32, 64, 128,
+# 256, so we render each size once and reuse where possible.
+WIN_SIZES = [16, 24, 32, 48, 64, 128, 256]
+MAC_SIZES = [16, 32, 64, 128, 256, 512, 1024]
 
-OUTPUT = Path("windows/runner/resources/app_icon.ico")
+WIN_OUTPUT = Path("windows/runner/resources/app_icon.ico")
+MAC_OUTPUT_DIR = Path("macos/Runner/Assets.xcassets/AppIcon.appiconset")
+
+
+def add_outline(
+    img: Image.Image, color: tuple[int, int, int, int] = (255, 255, 255, 255)
+) -> Image.Image:
+    """Paint every transparent pixel adjacent (8-neighbour) to an opaque
+    pixel with the given colour. Non-transparent pixels are not touched.
+
+    Applied to the hand-drawn base sizes (16 and 32) before upscaling, so
+    the white halo scales with the rest of the design under nearest-
+    neighbour resize — 1 base pixel → 1 base pixel wide at every output
+    size, matching the pixel-art aesthetic.
+    """
+    src = img.load()
+    out = img.copy()
+    dst = out.load()
+    w, h = img.size
+    for y in range(h):
+        for x in range(w):
+            if src[x, y][3] != 0:
+                continue
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < w and 0 <= ny < h and src[nx, ny][3] != 0:
+                        dst[x, y] = color
+    return out
 
 
 def render_grid(grid: str, size: int) -> Image.Image:
@@ -157,12 +194,12 @@ def write_ico(images: list[Image.Image], path: Path) -> None:
                 "<BBBBHHII",
                 w if w < 256 else 0,  # width  (0 means 256)
                 h if h < 256 else 0,  # height (0 means 256)
-                0,                    # palette colour count
-                0,                    # reserved
-                1,                    # colour planes
-                32,                   # bits per pixel
-                len(png),             # bytes in image data
-                offset,               # absolute offset to image data
+                0,  # palette colour count
+                0,  # reserved
+                1,  # colour planes
+                32,  # bits per pixel
+                len(png),  # bytes in image data
+                offset,  # absolute offset to image data
             )
         )
         offset += len(png)
@@ -175,14 +212,22 @@ def write_ico(images: list[Image.Image], path: Path) -> None:
 
 
 def main() -> None:
-    base_32 = render_grid(GRID, 32)
-    base_16 = render_grid(GRID_16, 16)
-    images = [
-        base_16 if s == 16 else base_32.resize((s, s), Image.NEAREST)
-        for s in SIZES
-    ]
-    write_ico(images, OUTPUT)
-    print(f"Wrote {OUTPUT} with sizes {SIZES}")
+    # Render and outline the two hand-drawn base sizes once.
+    base_32 = add_outline(render_grid(GRID, 32))
+    base_16 = add_outline(render_grid(GRID_16, 16))
+
+    def at(size: int) -> Image.Image:
+        if size == 16:
+            return base_16
+        return base_32.resize((size, size), Image.NEAREST)
+
+    write_ico([at(s) for s in WIN_SIZES], WIN_OUTPUT)
+    print(f"Wrote {WIN_OUTPUT} with sizes {WIN_SIZES}")
+
+    MAC_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    for s in MAC_SIZES:
+        at(s).save(MAC_OUTPUT_DIR / f"app_icon_{s}.png")
+    print(f"Wrote {len(MAC_SIZES)} macOS PNGs to {MAC_OUTPUT_DIR}")
 
 
 if __name__ == "__main__":
