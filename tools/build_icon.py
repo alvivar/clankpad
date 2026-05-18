@@ -26,7 +26,7 @@ from PIL import Image
 #
 #   .  transparent          K  charcoal outline / dark body
 #   B  slate body fill      P  cream paper
-#   L  ink-blue text line   A  cool-yellow LED antenna tip
+#   L  ink-blue text line   A  mint-green LED antenna tip
 #   E  pale cyan eye glow
 #
 # Concept: a notepad with a small bot head emerging from the top edge like
@@ -81,7 +81,7 @@ PALETTE = {
     "B": (0x2D, 0x2D, 0x34, 255),  # slate: body fill (slight depth)
     "P": (0xF3, 0xEA, 0xD0, 255),  # cream: pad paper
     "L": (0x2A, 0x5A, 0x87, 255),  # ink blue: text strokes
-    "A": (0xEC, 0xD6, 0x51, 255),  # cool yellow: antenna LED
+    "A": (0x7D, 0xD8, 0x7A, 255),  # mint green: antenna LED
     "E": (0x9B, 0xD6, 0xE1, 255),  # pale cyan: eye glow
 }
 
