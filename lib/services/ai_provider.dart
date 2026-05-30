@@ -110,9 +110,15 @@ abstract class AiProvider {
       'Return ONLY the requested output text. '
       'Do not include explanations, preambles, commentary, or surrounding '
       'markdown code fences unless the user explicitly asks for them. '
-      "Preserve the document's style, tone, formatting, indentation, and "
-      'structure unless the user asks to change them. '
+      "Preserve the document's language, style, tone, formatting, "
+      'indentation, and structure unless the user asks to change them. '
       'The document may contain prose, notes, markdown, lists, or code.';
+
+  /// Sentinel marking the insertion point in insert-mode prompts. Pure ASCII
+  /// and deliberately unlovely: it tokenises predictably across every model
+  /// Pi can route to (including small/old ones) and never collides with real
+  /// document text. The model is told never to echo it back.
+  static const String cursorMarker = '<<<CLANKPAD_CURSOR>>>';
 
   /// Builds the prompt message sent to the model. Shared across all providers
   /// because the editing contract (document + target + instruction) is the
@@ -124,28 +130,33 @@ abstract class AiProvider {
     int? insertOffset,
   }) {
     if (editTarget.isEmpty) {
-      // Insert mode: embed a [CURSOR] marker so the model sees the full
+      // Insert mode: embed a cursor marker so the model sees the full
       // document as a coherent whole with a precise insertion point.
       final offset = insertOffset ?? documentText.length;
       final before = documentText.substring(0, offset);
       final after = documentText.substring(offset);
       return 'Document:\n'
-          '$before[CURSOR]$after\n'
+          '$before$cursorMarker$after\n'
           '\n'
           'Instruction: $userInstruction\n'
           '\n'
-          'IMPORTANT: Reply with ONLY the text to insert at [CURSOR]. '
-          'Do not include surrounding blank lines. No explanations, no preamble.';
+          'IMPORTANT: Reply with ONLY the text to insert at $cursorMarker. '
+          'The cursor marker is not part of the document; never include it in '
+          'your reply. Do not add leading/trailing blank lines unless required '
+          'to satisfy the instruction. No explanations, no preamble, no '
+          'markdown fences.';
     }
-    return 'Document context:\n'
+    return 'Full document context:\n'
         '$documentText\n'
         '\n'
-        'Edit target:\n'
+        'Edit target to replace (copied verbatim from the document above):\n'
         '$editTarget\n'
         '\n'
         'Instruction: $userInstruction\n'
         '\n'
-        'IMPORTANT: Reply with ONLY the transformed text. '
-        'No explanations, no preamble.';
+        'IMPORTANT: Return ONLY the replacement for the Edit target. '
+        'Do not echo any surrounding document text. Preserve leading/trailing '
+        'whitespace and blank lines unless required to satisfy the '
+        'instruction. No explanations, no preamble, no markdown fences.';
   }
 }
