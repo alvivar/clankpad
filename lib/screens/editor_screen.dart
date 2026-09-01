@@ -159,7 +159,7 @@ class _EditorScreenState extends State<EditorScreen> {
     return (paraStart, paraEnd);
   }
 
-  // ── Move line ────────────────────────────────────────────────────────────────
+  // ── Line operations ──────────────────────────────────────────────────────────
 
   /// Moves the line(s) covered by the current selection up (-1) or down (+1)
   /// by swapping with the adjacent line. Multi-line selections move as a block.
