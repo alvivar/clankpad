@@ -81,8 +81,16 @@ void main() {
       expect(joinLines('a\rb'), 'a b');
     });
 
-    test('normalises CRLF without inventing a paragraph break', () {
-      expect(joinLines('a\r\n\r\nb'), 'a\n\nb');
+    test('preserves CRLF paragraph breaks', () {
+      expect(joinLines('a\r\n\r\nb'), 'a\r\n\r\nb');
+    });
+
+    test('leaves an already-joined CRLF document unchanged', () {
+      expect(joinLines('line1\r\n\r\nline2'), 'line1\r\n\r\nline2');
+    });
+
+    test('joins CRLF lines while preserving paragraph breaks', () {
+      expect(joinLines('a\r\nb\r\n\r\nc'), 'a b\r\n\r\nc');
     });
 
     test('is idempotent for multiple paragraphs', () {

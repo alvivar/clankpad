@@ -1,4 +1,5 @@
-/// Joins hard-wrapped lines into one line per paragraph.
+/// Joins hard-wrapped lines into one line per paragraph, preserving CRLF
+/// line endings.
 ///
 /// A paragraph is a maximal run of non-blank lines — matching
 /// `_paragraphRangeAt` in editor_screen.dart. A whitespace-only line is blank
@@ -6,13 +7,9 @@
 /// survives, but are emitted empty: the stray trailing spaces they carry are
 /// the terminal artefact this feature exists to remove.
 String joinLines(String text) {
-  // Normalise line endings. The CRLF pass must run FIRST: the lone-CR pass
-  // would otherwise turn each "\r\n" into two newlines, inventing a paragraph
-  // break. Lone-CR documents are rare, but never split at all without it.
-  final lines = text
-      .replaceAll('\r\n', '\n')
-      .replaceAll('\r', '\n')
-      .split('\n');
+  // One pass over every line-ending convention: `\r\n?` is greedy, so CRLF is
+  // consumed whole rather than leaving a stray \n behind.
+  final lines = text.split(RegExp(r'\r\n?|\n'));
   final out = StringBuffer();
   var inParagraph = false;
 
@@ -32,5 +29,8 @@ String joinLines(String text) {
     }
     out.write(content);
   }
-  return out.toString();
+  final joined = out.toString();
+  // Restore CRLF if the input used it, so joining a Windows file neither
+  // rewrites its endings nor defeats the caller's no-op comparison.
+  return text.contains('\r\n') ? joined.replaceAll('\n', '\r\n') : joined;
 }
