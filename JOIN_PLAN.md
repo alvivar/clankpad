@@ -274,11 +274,180 @@ compile check.
 
 ## Out of scope
 
-- **Line-ending preservation.** `Ctrl+J` emits LF, so joining a selection inside
-  a CRLF file yields mixed endings that persist on save. This is **pre-existing**
-  app behaviour (AI edits already insert LF into CRLF documents, and
-  `editor_state.dart:343` does `readAsString()` with no normalisation). A proper
-  "preserve document line endings" pass is a separate task.
+- ~~**Line-ending preservation.**~~ **RETRACTED — see Task 3.** This section
+  originally waved CRLF away as pre-existing, comparing it to AI edits. That
+  reasoning was WRONG: an AI edit converts endings only inside the edited
+  region, whereas `Ctrl+J` with no selection rewrites **every line ending in
+  the document**, and the no-op guard never fires on a CRLF file. Found by
+  independent review (fable@clankpad) after the feature shipped.
+
+---
+
+# Task 3 — post-review fixes (round 2)
+
+From an independent post-merge review by fable@clankpad of commits `6643c15`
+and `521844e`. Four items, one task, three commits. All claims below were
+verified empirically by the orchestrator before planning.
+
+Baseline for this round: `flutter analyze` 0 issues, `flutter test` 33/33,
+worktree clean apart from `LEDGER-JOIN_PLAN.md` (untracked) and this file
+(modified — the amendment you are reading).
+
+## 3a. CRLF defeats the no-op guard and converts the whole file (REAL BUG)
+
+**Where** — `lib/services/text_join.dart`, `joinLines`.
+
+**Problem** — `joinLines` always emits LF. Verified empirically:
+
+```
+joinLines('line1\r\n\r\nline2') → 'line1\n\nline2'      // != input
+```
+
+So on a CRLF document `joined != source` even when nothing joins. Therefore:
+- `Ctrl+J` on an already-joined CRLF file marks the tab dirty and pushes an
+  undo entry with **no visible change** — the no-op guard in `_joinLines`
+  cannot fire.
+- In whole-document mode it **rewrites every line ending in the file**, which
+  the next save persists, silently converting a Windows file to LF.
+- Windows is the primary target and `editor_state.dart:343` uses
+  `readAsString()` with no normalisation, so CRLF files are the COMMON case.
+- A GUI smoke test would likely MISS this: text typed into a fresh in-app tab
+  is LF-only. It only reproduces on a CRLF file opened from disk.
+
+**Fix** — make `joinLines` preserve the input's convention. Combined with 3b,
+the whole function becomes:
+
+```dart
+/// Joins hard-wrapped lines into one line per paragraph, preserving CRLF
+/// line endings.
+///
+/// A paragraph is a maximal run of non-blank lines — matching
+/// `_paragraphRangeAt` in editor_screen.dart. A whitespace-only line is blank
+/// and separates paragraphs. Blank lines are preserved one-for-one so spacing
+/// survives, but are emitted empty: the stray trailing spaces they carry are
+/// the terminal artefact this feature exists to remove.
+String joinLines(String text) {
+  // One pass over every line-ending convention: `\r\n?` is greedy, so CRLF is
+  // consumed whole rather than leaving a stray \n behind.
+  final lines = text.split(RegExp(r'\r\n?|\n'));
+  final out = StringBuffer();
+  var inParagraph = false;
+
+  for (final (i, line) in lines.indexed) {
+    final content = line.trim();
+    // Every line but the first gets a separator: a space continues the current
+    // paragraph, a newline starts or ends one.
+    if (i > 0) out.write(inParagraph && content.isNotEmpty ? ' ' : '\n');
+    if (content.isEmpty) {
+      inParagraph = false;
+      continue;
+    }
+    // A paragraph's first line keeps its indentation; continuations go flush.
+    if (!inParagraph) {
+      out.write(line.substring(0, line.length - line.trimLeft().length));
+      inParagraph = true;
+    }
+    out.write(content);
+  }
+  final joined = out.toString();
+  // Restore CRLF if the input used it, so joining a Windows file neither
+  // rewrites its endings nor defeats the caller's no-op comparison.
+  return text.contains('\r\n') ? joined.replaceAll('\n', '\r\n') : joined;
+}
+```
+
+**Accepted behaviour** — a MIXED-ending input emits CRLF throughout the joined
+region (`contains('\r\n')` is the test). Deliberate: it keeps the joined region
+internally consistent and is strictly better than the current silent conversion
+to LF. Do not add per-line ending detection.
+
+**Why in the helper, not the handler** — the handler's no-op comparison is
+`joined == source`. For that to be meaningful the helper must round-trip
+endings, and the property is then testable in the helper's own tests.
+
+**Risk** — medium. Changes a committed, tested function AND one existing test
+expectation (see 3c).
+
+## 3b. Replace the ordered `replaceAll` pair with one regex split
+
+**Where** — same line as 3a's split.
+
+**Problem** — `text.replaceAll('\r\n','\n').replaceAll('\r','\n')` is an ORDERED
+pair: reversed, every `\r\n` becomes two newlines, inventing a paragraph break.
+The original plan defended this with a three-line warning comment — a footgun
+documented rather than removed.
+
+**Fix** — `text.split(RegExp(r'\r\n?|\n'))` (already shown in 3a). Verified
+byte-identical to the old expression on: `a\r\nb`, `a\rb`, `a\nb`,
+`a\r\n\r\nb`, `a\n\nb`, `''`, `x`. Makes the ordering hazard structurally
+impossible and deletes the comment defending it.
+
+**Risk** — low, but it is the line most worth re-verifying independently.
+
+## 3c. Test updates that PIN 3a
+
+**Where** — `test/text_join_test.dart`.
+
+- **CHANGE** existing case #19: input `'a\r\n\r\nb'`, expected
+  `'a\n\nb'` → **`'a\r\n\r\nb'`**. This is the fix working. It must be changed
+  deliberately, with the test name/comment reflecting ending preservation — NOT
+  quietly relaxed to match whatever the code emits.
+- **UNCHANGED** (confirm, do not edit): #17 `'a\r\nb'` → `'a b'` and #18
+  `'a\rb'` → `'a b'`. Both still hold: #17's output contains no `\n` for the
+  restore step to act on, and #18 has no CRLF.
+- **ADD** the no-op/round-trip case fable identified as missing — the existing
+  CRLF tests only cover joining, never the no-op path:
+  `'line1\r\n\r\nline2'` → `'line1\r\n\r\nline2'` (already joined, unchanged).
+- **ADD** a CRLF multi-paragraph join: `'a\r\nb\r\n\r\nc'` → `'a b\r\n\r\nc'`.
+
+**Verify** — `flutter test` must be green with the CHANGED expectation, and the
+two new cases must FAIL against the pre-fix implementation (that is what makes
+them regression tests rather than decoration).
+
+## 3d. Section banner rename (cosmetic, 1 line)
+
+**Where** — `lib/screens/editor_screen.dart:162`.
+
+**Problem** — `_joinLines` (line 204) sits under `// ── Move line ──...`, which
+does not describe it. Next banner is at 235.
+
+**Fix** — rename that banner to `// ── Line operations ──...`, matching the
+surrounding banners' `─`-padding width exactly. No code moves.
+
+**Risk** — none.
+
+## Explicitly NOT doing (verified, not deferred)
+
+- **CRLF pair split by a selection boundary** (`'a\r\nb'`, select `0..2`) would
+  invent a blank line. Unreachable: Flutter treats `\r\n` as one grapheme and
+  snaps selection to grapheme boundaries. No code, no test.
+- **Caret clamp landing mid-surrogate-pair** on a shrinking document. Settled
+  semantics are numeric-offset-clamped; Flutter tolerates it.
+- **Selection direction** is always normalised forward, dropping base/extent
+  order. Immaterial.
+- **Lone-CR (classic Mac) line endings.** The fix preserves CRLF only. A
+  CR-only document is still normalised to LF and so still always dirties the
+  tab: `joinLines('x\r\ry')` → `'x\n\ny'`. Deliberate — CR-only files are
+  effectively extinct, this matches pre-fix behaviour exactly (no regression),
+  and detecting a third convention buys nothing. The doc comment must therefore
+  claim CRLF preservation only, never "the document's convention".
+- **The plan's false `isValid` claim.** Task 2's invariant list asserts
+  "guaranteed in-bounds by `isValid`". That is FALSE —
+  `sky_engine/lib/ui/text.dart:2650` is `start >= 0 && end >= 0`, with no length
+  check. The real guarantee is an app-wide invariant that every programmatic
+  selection write is bounded; `_moveLines` has identical exposure. No crash
+  path today, no code change. Recorded because the RATIONALE was wrong.
+
+## Sequencing (round 2)
+
+Single task — 3a and 3b edit the same expression, 3c pins them, 3d is unrelated
+but one line. Gate after: `flutter analyze` (0 issues) + `flutter test` (all
+green, 35/35 expected: 33 existing with #19 changed, plus 2 new).
+
+Three commits at the end:
+1. `docs: retract line-ending exclusion and plan join fixes` → `JOIN_PLAN.md`
+2. `fix: preserve line endings when joining lines` → `lib/services/text_join.dart`, `test/text_join_test.dart`
+3. `refactor: widen editor line-operations section banner` → `lib/screens/editor_screen.dart`
 - Punctuation-aware joining (rejected — requirement 3).
 - Collapsing runs of spaces inside a line (rejected — requirement 6).
 - Custom undo boundaries to defeat the 500ms coalescing window.
