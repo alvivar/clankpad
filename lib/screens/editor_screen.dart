@@ -9,6 +9,7 @@ import '../models/intents.dart';
 import '../services/ai_provider.dart';
 import '../services/claude_code_provider.dart';
 import '../services/pi_provider.dart';
+import '../services/text_join.dart';
 import '../state/editor_state.dart';
 import '../widgets/ai_diff_view.dart';
 import '../widgets/ai_prompt_popup.dart' show AiModelSettings, AiPromptPopup;
@@ -195,6 +196,39 @@ class _EditorScreenState extends State<EditorScreen> {
         baseOffset: selection.baseOffset + delta,
         extentOffset: selection.extentOffset + delta,
       ),
+    );
+  }
+
+  /// Joins hard-wrapped lines within the selection, or the whole document when
+  /// there is no selection. See `joinLines` for the paragraph rules.
+  void _joinLines() {
+    if (!_editorFocusNode.hasFocus || _editorReadOnly) return;
+    final controller = _state.activeTab.controller;
+    final text = controller.text;
+    final selection = controller.selection;
+    if (!selection.isValid) return;
+
+    final hadSelection = !selection.isCollapsed;
+    final start = hadSelection ? selection.start : 0;
+    final end = hadSelection ? selection.end : text.length;
+    final source = text.substring(start, end);
+    final joined = joinLines(source);
+    if (joined == source) return; // no-op: don't dirty the tab or push undo
+
+    final newText = text.replaceRange(start, end, joined);
+    controller.value = TextEditingValue(
+      text: newText,
+      // Selection mode leaves the result selected. Whole-document mode keeps
+      // the caret where it was rather than selecting the entire file, which
+      // would make one stray keystroke wipe the document.
+      selection: hadSelection
+          ? TextSelection(
+              baseOffset: start,
+              extentOffset: start + joined.length,
+            )
+          : TextSelection.collapsed(
+              offset: selection.baseOffset.clamp(0, newText.length),
+            ),
     );
   }
 
@@ -992,6 +1026,8 @@ class _EditorScreenState extends State<EditorScreen> {
             OpenAiPromptIntent(),
         SingleActivator(LogicalKeyboardKey.keyF, control: true):
             OpenSearchIntent(),
+        SingleActivator(LogicalKeyboardKey.keyJ, control: true):
+            JoinLinesIntent(),
         SingleActivator(LogicalKeyboardKey.arrowUp, alt: true):
             MoveLineUpIntent(),
         SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
@@ -1023,6 +1059,9 @@ class _EditorScreenState extends State<EditorScreen> {
           ),
           OpenSearchIntent: CallbackAction<OpenSearchIntent>(
             onInvoke: (_) => _openSearch(),
+          ),
+          JoinLinesIntent: CallbackAction<JoinLinesIntent>(
+            onInvoke: (_) => _joinLines(),
           ),
           MoveLineUpIntent: CallbackAction<MoveLineUpIntent>(
             onInvoke: (_) => _moveLines(-1),
