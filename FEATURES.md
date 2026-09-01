@@ -46,10 +46,16 @@ Clankpad's core differentiator. These ideas deepen the AI integration beyond sin
 - [ ] **Copy as markdown code block** — select text, right-click or shortcut → copies as ` ```lang\n...\n``` ` with the language inferred from the file extension. Essential for pasting into AI agent prompts, GitHub issues, or chat.
 - [ ] **Paste as plain text (`Ctrl+Shift+V`)** — strip formatting when pasting from browsers, docs, etc. Always plain text. (Standard `Ctrl+V` already does this in a plain TextField, but worth making explicit if rich paste ever becomes an issue.)
 - [ ] **AI diff: partial accept** — in the unified diff view, let the user accept individual generated lines or hunks rather than all-or-nothing.
+- [ ] **AI diff: character-level highlighting** — highlight changed characters within a line rather than only marking the whole line; word-level whitespace/punctuation tokenization is superseded.
+- [ ] **AI diff: side-by-side toggle** — must keep wrapped-line row heights aligned between the panes.
+
+Any future AI diff work must use pure-Dart LCS with no dependencies or cache, recomputing in `build()`.
+
 - [ ] **AI edit history / undo stack** — after accepting a diff, Ctrl+Z undoes the entire AI edit as a single operation (not character by character). Conceptually: the AI replacement is one undo entry.
 - [ ] **Persist prompt history across sessions** — currently session-only. Save the last N prompts to disk so they survive restarts. Developers repeat patterns ("update the spec for X", "add error handling") and history is muscle memory.
 - [ ] **Prompt context: clipboard** — add a `@clipboard` token in the Ctrl+K prompt that expands to the current clipboard content. Useful for "rewrite this in the style of @clipboard" or "merge this with @clipboard".
 - [ ] **AI: generate from blank** — when Ctrl+K is used on an empty tab with no selection, treat the prompt as a generation instruction rather than an edit. "Write a Python script that..." or "Draft a SPEC for...". The result fills the tab.
+- [ ] **First-run auth hint** — detect auth-shaped Pi failures and suggest running `pi /login` in the error banner.
 
 ---
 
@@ -69,7 +75,7 @@ Features that make Clankpad useful beyond a plain scratchpad — without turning
 - [ ] **Minimap** — a narrow column on the right showing a zoomed-out view of the file. Click to navigate. Useful for orientation in longer files.
 - [ ] **Sticky scroll / breadcrumb** — show the current function/class/section name at the top of the editor when scrolled deep into a file. Requires parsing; could start with indent-based heuristics.
 - [ ] **Diff two tabs** — select two open tabs and see a side-by-side diff. Useful for comparing AI output variations, before/after edits, or two versions of a spec.
-- [ ] **Markdown preview** — side-by-side or toggle for `.md` files. Clankpad is already used for plans and READMEs; rendering them is natural. See `docs/plans/markdown-preview.md`.
+- [ ] **Markdown-first editing** — make Clankpad a Markdown-first editor, with preview as one part of the experience.
 - [ ] **Open containing folder** — right-click tab → "Reveal in Explorer". One click to get to the file's directory.
 - [ ] **Copy file path** — right-click tab → "Copy Path" / "Copy Relative Path". Useful for pasting into terminal commands or AI prompts.
 - [ ] **Encoding handling** — detect file encoding on open (UTF-8, UTF-16, Latin-1). Show in status bar. Allow conversion on save.
@@ -114,6 +120,15 @@ A lightweight settings system to back the features above.
 
 - [ ] **Settings file** — `%APPDATA%\Clankpad\settings.json`. Separate from `session.json` (settings are preferences; session is state). Editable as a JSON file directly — no settings UI needed initially. Clankpad can open its own settings file in a tab for editing.
 - [ ] **Settings candidates**: font family, font size, tab size (2/4/8), word wrap default, auto-save interval, theme, line numbers on/off, always-on-top, trim trailing whitespace, prompt templates list.
+
+---
+
+## Known Defects
+
+- [ ] **Pi retry truncation** — partial output can be accepted as a complete AI diff because Clankpad stops at `agent_end`, which can precede retry, without inspecting an error stop reason.
+- [ ] **Pi context-file leakage** — user or project context files can contaminate the editor-specific system prompt because Pi appends them after `--system-prompt` and Clankpad inherits its working directory.
+- [ ] **Pi model filtering divergence** — valid `enabledModels` settings can silently be ignored because Clankpad's matcher lacks Pi's case-insensitive glob, bare-ID, and fuzzy matching semantics.
+- [ ] **Windows AI process leak** — closing Clankpad can leave Pi or Claude Code running because window-X does not dispose providers and killing a `runInShell` `cmd.exe` wrapper leaves its Node child running (known fix shape: `taskkill /T` tree-kill + `exitApplication` funnel — see git history).
 
 ---
 

@@ -245,16 +245,10 @@ If an AI provider fails, Clankpad shows a dismissible error banner and unlocks t
 ## Documentation
 
 - Feature backlog: [`FEATURES.md`](FEATURES.md)
-- Markdown preview plan: [`docs/plans/markdown-preview.md`](docs/plans/markdown-preview.md)
-- Archived implementation spec: [`docs/archive/SPEC.md`](docs/archive/SPEC.md)
 - Vendor references: [`docs/vendor/`](docs/vendor/)
 
 ---
 
 ## What's Coming
 
-See [`FEATURES.md`](FEATURES.md) for the broader wishlist. Current focused plans include:
-
-- AI diff polish — word-level highlighting, side-by-side toggle, and per-hunk accept/reject: [`DIFF_PLAN.md`](DIFF_PLAN.md)
-- Markdown preview: [`docs/plans/markdown-preview.md`](docs/plans/markdown-preview.md)
-- Status bar, find/replace, line numbers, file watcher, and syntax highlighting
+See [`FEATURES.md`](FEATURES.md) for the broader wishlist, including status bar, find/replace, line numbers, file watcher, syntax highlighting, and future AI diff work.
