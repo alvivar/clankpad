@@ -284,9 +284,12 @@ class PiProvider {
           if (event['willRetry'] == true ||
               (stopReason != 'stop' && stopReason != 'aborted')) {
             final errorMessage = lastAssistant?['errorMessage'] as String?;
+            final message = errorMessage == 'fetch failed'
+                ? "Couldn't reach the AI service. Check your connection and try again."
+                : errorMessage;
             throw AiProviderError(
-              errorMessage != null && errorMessage.isNotEmpty
-                  ? errorMessage
+              message != null && message.isNotEmpty
+                  ? message
                   : 'Pi stopped: ${stopReason ?? 'unknown'}',
             );
           }

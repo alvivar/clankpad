@@ -1048,8 +1048,13 @@ class _EditorScreenState extends State<EditorScreen> {
 
               // Error banner — shown after a Pi failure; dismissed by ×.
               if (_errorBanner != null)
-                ColoredBox(
-                  color: colorScheme.errorContainer,
+                DecoratedBox(
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF252C30),
+                    border: Border(
+                      left: BorderSide(color: Color(0xFFD99B79), width: 3),
+                    ),
+                  ),
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
                     child: Row(
@@ -1057,8 +1062,8 @@ class _EditorScreenState extends State<EditorScreen> {
                         Expanded(
                           child: Text(
                             _errorBanner!,
-                            style: TextStyle(
-                              color: colorScheme.onErrorContainer,
+                            style: const TextStyle(
+                              color: Color(0xFFE0E6E9),
                               fontSize: 13,
                             ),
                           ),
@@ -1067,7 +1072,7 @@ class _EditorScreenState extends State<EditorScreen> {
                           onPressed: () => setState(() => _errorBanner = null),
                           icon: const Icon(Icons.close),
                           iconSize: 16,
-                          color: colorScheme.onErrorContainer,
+                          color: const Color(0xFFE0E6E9),
                           visualDensity: VisualDensity.compact,
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
