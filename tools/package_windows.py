@@ -136,7 +136,6 @@ Optional AI features:
 - Pi provider: install Node.js, then run:
   npm install -g @earendil-works/pi-coding-agent
   pi /login
-- Claude Code provider: install Claude Code so 'claude' is available on PATH.
 
 Notes:
 - This portable build does not require an installer.

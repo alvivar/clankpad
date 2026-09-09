@@ -34,7 +34,7 @@ class EditorState extends ChangeNotifier {
 
   // ── Persisted AI preferences ────────────────────────────────────────────────
 
-  // Last-used provider key (e.g. 'pi', 'claude_code').
+  // Last-used provider key.
   String? lastProviderKey;
 
   // Per-provider model and thinking level preferences. Keyed by provider key.

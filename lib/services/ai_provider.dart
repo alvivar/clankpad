@@ -55,9 +55,8 @@ class AiProviderModels {
 
 /// Backend-agnostic interface for AI-assisted text editing.
 ///
-/// Each provider (Pi, Claude Code, …) implements this to supply models and
-/// stream edited text. The UI layer ([EditorScreen]) holds one or more
-/// providers and delegates to whichever the user has selected.
+/// Supplies models and streams edited text. The UI layer ([EditorScreen])
+/// delegates requests to the selected provider.
 abstract class AiProvider {
   /// Human-readable name shown in the provider picker (e.g. "Pi").
   String get name;
@@ -93,10 +92,9 @@ abstract class AiProvider {
 
   // ── Shared prompt construction ────────────────────────────────────────────
 
-  /// System prompt passed to every provider (`pi --system-prompt` /
-  /// `claude --system-prompt`). Frames the model as a text-editor assistant
-  /// rather than a coding agent — both Pi and Claude Code default to a
-  /// coding-agent system prompt, which biases output toward code fences,
+  /// System prompt passed to Pi via `--system-prompt`. Frames the model as a
+  /// text-editor assistant rather than a coding agent, whose default system
+  /// prompt biases output toward code fences,
   /// tool usage, and verbose explanations. The per-request prompts built by
   /// [buildPromptMessage] still include `IMPORTANT:` contract lines as
   /// belt-and-suspenders.

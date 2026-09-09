@@ -8,9 +8,7 @@ A minimalist, distraction-free plain-text editor with multi-tab support, hot-exi
 
 - [Flutter SDK](https://docs.flutter.dev/get-started/install) (Dart SDK ^3.11.0)
 - Windows (primary target; macOS/Linux runners exist but are less tested)
-- Optional, for AI features:
-  - [Node.js](https://nodejs.org/) + [Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
-  - and/or [Claude Code](https://docs.anthropic.com/claude-code)
+- Optional, for AI features: [Node.js](https://nodejs.org/) + [Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
 
 Pi setup example:
 
@@ -18,8 +16,6 @@ Pi setup example:
 npm install -g @earendil-works/pi-coding-agent
 pi /login
 ```
-
-Claude Code must be installed as `claude` on `PATH` and authenticated separately.
 
 ---
 
@@ -137,7 +133,7 @@ Clankpad continuously saves session state so closing the app does not lose work.
 
 - Changes are debounced and written after 500 ms.
 - On app exit, pending session writes are flushed synchronously.
-- On reopen, tabs, file paths, unsaved text, active tab, and AI provider/model preferences are restored.
+- On reopen, tabs, file paths, unsaved text, active tab, and AI model preferences are restored.
 - Clean file-backed tabs are re-read from disk.
 - Dirty file-backed tabs restore unsaved content from the session.
 - Missing/deleted files produce a startup notice instead of silently losing content.
@@ -156,14 +152,7 @@ On non-Windows platforms the fallback location is `./session.json`.
 
 `Ctrl+K` opens a floating prompt for AI-assisted text editing. Clankpad does not store API keys or call model APIs directly; it shells out to a local AI backend.
 
-Registered providers:
-
-| Provider    | Backend                                              |
-| ----------- | ---------------------------------------------------- |
-| Pi          | Long-lived `pi --mode rpc` subprocess                |
-| Claude Code | One-shot `claude -p --output-format stream-json` run |
-
-Both providers are launched with a text-editor-specific system prompt. Pi is launched with tools disabled; Claude Code is run without session persistence.
+Pi runs as a long-lived `pi --mode rpc` subprocess with a text-editor-specific system prompt and tools disabled.
 
 ### Edit target behavior
 
@@ -183,7 +172,6 @@ The edit target is highlighted until the prompt is dismissed or the diff is acce
 | `Shift+Enter` | Insert newline in prompt                                         |
 | `Escape`      | Dismiss popup                                                    |
 | `↑` / `↓`     | Browse prompt history when cursor is on first/last line          |
-| `Ctrl+Tab`    | Cycle AI provider                                                |
 | `Ctrl+P`      | Cycle model                                                      |
 | `Shift+Tab`   | Cycle thinking level when the effective model supports reasoning |
 

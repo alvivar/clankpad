@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import '../models/editor_tab.dart';
 import '../models/intents.dart';
 import '../services/ai_provider.dart';
-import '../services/claude_code_provider.dart';
 import '../services/pi_provider.dart';
 import '../services/text_join.dart';
 import '../state/editor_state.dart';
@@ -86,10 +85,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // All registered providers. Processes are killed if the screen is disposed
   // while a request is in-flight.
-  final Map<String, AiProvider> _providers = {
-    'pi': PiProvider(),
-    'claude_code': ClaudeCodeProvider(),
-  };
+  final Map<String, AiProvider> _providers = {'pi': PiProvider()};
 
   late String _selectedProviderKey;
 
@@ -548,23 +544,6 @@ class _EditorScreenState extends State<EditorScreen> {
       controller.setEditTarget(highlight.start, highlight.end);
     }
 
-    _fetchModelsForActiveProvider();
-  }
-
-  // ── Provider switching ───────────────────────────────────────────────────────
-
-  void _onProviderChanged(String key) {
-    if (key == _selectedProviderKey) return;
-    setState(() {
-      _selectedProviderKey = key;
-      _selectedProvider = null;
-      _selectedModelId = null;
-      _thinkingLevel = 'off';
-      // Clear models so _fetchModelsForActiveProvider goes through the
-      // seeding path (_applyCachedModels) even when a cache entry exists.
-      _availableModels = [];
-      _modelsLoading = false;
-    });
     _fetchModelsForActiveProvider();
   }
 
@@ -1199,15 +1178,6 @@ class _EditorScreenState extends State<EditorScreen> {
                           selectedProvider: _selectedProvider,
                           selectedModelId: _selectedModelId,
                           thinkingLevel: _thinkingLevel,
-                          providerKey: _selectedProviderKey,
-                          providerNames: {
-                            for (final e in _providers.entries)
-                              e.key: e.value.name,
-                          },
-                          supportedThinkingLevels:
-                              _selectedProviderKey == 'claude_code'
-                              ? const ['low', 'medium', 'high']
-                              : const ['off', 'low', 'medium', 'high'],
                         ),
                         onModelChanged: (provider, modelId) => setState(() {
                           _selectedProvider = provider;
@@ -1215,7 +1185,6 @@ class _EditorScreenState extends State<EditorScreen> {
                         }),
                         onThinkingLevelChanged: (level) =>
                             setState(() => _thinkingLevel = level),
-                        onProviderChanged: _onProviderChanged,
                       ),
 
                     if (_diffVisible)

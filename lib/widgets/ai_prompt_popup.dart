@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import '../models/intents.dart';
 import '../services/ai_provider.dart';
 
+const _thinkingLevels = ['off', 'low', 'medium', 'high'];
+
 /// Snapshot of model/thinking state passed from EditorScreen to the popup.
 /// Kept as a data class so the popup receives a single param instead of many.
 class AiModelSettings {
@@ -13,24 +15,12 @@ class AiModelSettings {
   final String? selectedModelId;
   final String thinkingLevel;
 
-  /// Currently active AI provider key (e.g. 'pi', 'claude_code').
-  final String providerKey;
-
-  /// All registered provider keys → display names.
-  final Map<String, String> providerNames;
-
-  /// Which thinking levels to show in the picker.
-  final List<String> supportedThinkingLevels;
-
   const AiModelSettings({
     required this.availableModels,
     required this.loading,
     required this.selectedProvider,
     required this.selectedModelId,
     required this.thinkingLevel,
-    required this.providerKey,
-    required this.providerNames,
-    required this.supportedThinkingLevels,
   });
 }
 
@@ -57,9 +47,6 @@ class AiPromptPopup extends StatefulWidget {
   /// Called when the user picks a different thinking level.
   final void Function(String level) onThinkingLevelChanged;
 
-  /// Called when the user picks a different AI provider.
-  final void Function(String providerKey) onProviderChanged;
-
   const AiPromptPopup({
     super.key,
     required this.onDismiss,
@@ -69,7 +56,6 @@ class AiPromptPopup extends StatefulWidget {
     required this.modelSettings,
     required this.onModelChanged,
     required this.onThinkingLevelChanged,
-    required this.onProviderChanged,
   });
 
   @override
@@ -207,25 +193,12 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                           return KeyEventResult.handled;
                         }
 
-                        // Ctrl+Tab — cycle provider forward.
-                        if (event.logicalKey == LogicalKeyboardKey.tab &&
-                            HardwareKeyboard.instance.isControlPressed) {
-                          final names = settings.providerNames;
-                          if (names.length > 1) {
-                            final keys = names.keys.toList();
-                            final cur = keys.indexOf(settings.providerKey);
-                            final next = (cur + 1) % keys.length;
-                            widget.onProviderChanged(keys[next]);
-                          }
-                          return KeyEventResult.handled;
-                        }
-
                         // Shift+Tab — cycle thinking level forward (only when
                         // the effective model supports thinking).
                         if (event.logicalKey == LogicalKeyboardKey.tab &&
                             HardwareKeyboard.instance.isShiftPressed &&
                             modelSupportsThinking) {
-                          final levels = settings.supportedThinkingLevels;
+                          const levels = _thinkingLevels;
                           final cur = levels.indexOf(settings.thinkingLevel);
                           final next = (cur + 1) % levels.length;
                           widget.onThinkingLevelChanged(levels[next]);
@@ -267,19 +240,12 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                       ),
                     ),
 
-                    // ── Provider / model / thinking footer ────────────────────
+                    // ── Model / thinking footer ───────────────────────────────
                     const Divider(height: 1),
                     SizedBox(
                       height: 32,
                       child: Row(
                         children: [
-                          if (settings.providerNames.length > 1)
-                            _ProviderPicker(
-                              providerKey: settings.providerKey,
-                              providerNames: settings.providerNames,
-                              onChanged: widget.onProviderChanged,
-                              onFocusBack: _textFieldFocusNode.requestFocus,
-                            ),
                           _ModelPicker(
                             settings: settings,
                             onChanged: widget.onModelChanged,
@@ -289,7 +255,7 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                           if (modelSupportsThinking)
                             _ThinkingPicker(
                               level: settings.thinkingLevel,
-                              levels: settings.supportedThinkingLevels,
+                              levels: _thinkingLevels,
                               onChanged: widget.onThinkingLevelChanged,
                               onFocusBack: _textFieldFocusNode.requestFocus,
                             ),
@@ -376,45 +342,6 @@ class _ModelPicker extends StatelessWidget {
         onChanged(m.provider, m.id);
         onFocusBack?.call();
       },
-    );
-  }
-}
-
-class _ProviderPicker extends StatelessWidget {
-  const _ProviderPicker({
-    required this.providerKey,
-    required this.providerNames,
-    required this.onChanged,
-    this.onFocusBack,
-  });
-
-  final String providerKey;
-  final Map<String, String> providerNames;
-  final void Function(String key) onChanged;
-  final VoidCallback? onFocusBack;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: DropdownButton<String>(
-        value: providerKey,
-        isDense: true,
-        underline: const SizedBox.shrink(),
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: colorScheme.onSurface,
-        ),
-        items: providerNames.entries.map((e) {
-          return DropdownMenuItem<String>(value: e.key, child: Text(e.value));
-        }).toList(),
-        onChanged: (key) {
-          if (key != null) onChanged(key);
-          onFocusBack?.call();
-        },
-      ),
     );
   }
 }
