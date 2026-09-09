@@ -34,14 +34,9 @@ class EditorState extends ChangeNotifier {
 
   // ── Persisted AI preferences ────────────────────────────────────────────────
 
-  // Last-used provider key.
-  String? lastProviderKey;
-
-  // Per-provider model and thinking level preferences. Keyed by provider key.
-  // Each value is {'modelProvider': ..., 'modelId': ..., 'thinkingLevel': ...}.
-  // Persisted in session.json so each provider's choice survives app restarts
-  // and provider switching within a session.
-  Map<String, Map<String, String>> providerPrefs = {};
+  // Pi model and thinking-level preferences.
+  // Keys: modelProvider, modelId, thinkingLevel.
+  Map<String, String> aiPrefs = {};
 
   // Notices collected during session restore (missing files, etc.).
   // Consumed once by EditorScreen via takeStartupNotices().
@@ -194,12 +189,9 @@ class EditorState extends ChangeNotifier {
     _structuralChange();
   }
 
-  // Updates the active AI provider key and that provider's prefs, then fires
-  // onAnyChange so the debounced session writer schedules a save. Must be used
-  // instead of direct field assignment — those would silently fail to persist.
-  void setAiPrefs(String providerKey, Map<String, String> prefs) {
-    lastProviderKey = providerKey;
-    providerPrefs[providerKey] = prefs;
+  // Updates AI preferences and schedules a debounced session write.
+  void setAiPrefs(Map<String, String> prefs) {
+    aiPrefs = prefs;
     onAnyChange?.call();
   }
 
@@ -212,7 +204,7 @@ class EditorState extends ChangeNotifier {
   // consumed by EditorScreen via takeStartupNotices().
   Future<void> restoreFromSession(Map<String, dynamic> json) async {
     // Outer try guards top-level shape mismatches (e.g. `tabs: "oops"`,
-    // `providerPrefs: 42`, `nextTabId: "hi"`). The contract is that a
+    // `aiPrefs: 42`, `nextTabId: "hi"`). The contract is that a
     // parseable-but-malformed session.json never blocks startup — on any
     // unhandled cast we reset to the constructor-equivalent initial state
     // (one untitled tab) and surface a notice.
@@ -221,15 +213,8 @@ class EditorState extends ChangeNotifier {
       _untitledCounter = (json['untitledCounter'] as int?) ?? _untitledCounter;
       final storedActiveIndex = (json['activeTabIndex'] as int?) ?? 0;
 
-      lastProviderKey = json['lastProviderKey'] as String?;
-
-      // Restore per-provider prefs from the current session format.
-      final prefsJson = json['providerPrefs'] as Map<String, dynamic>?;
-      if (prefsJson != null) {
-        providerPrefs = prefsJson.map(
-          (k, v) => MapEntry(k, Map<String, String>.from(v as Map)),
-        );
-      }
+      final prefsJson = json['aiPrefs'] as Map<String, dynamic>?;
+      if (prefsJson != null) aiPrefs = Map<String, String>.from(prefsJson);
 
       // Dispose the initial tab created by the constructor.
       for (final tab in _tabs) {
@@ -283,8 +268,7 @@ class EditorState extends ChangeNotifier {
     _activeTabIndex = 0;
     _nextTabId = 0;
     _untitledCounter = 0;
-    lastProviderKey = null;
-    providerPrefs = {};
+    aiPrefs = {};
     _startupNotices.clear();
     _addUntitledTab();
   }

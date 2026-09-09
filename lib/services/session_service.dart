@@ -161,10 +161,7 @@ class SessionService {
       'nextTabId': _state.nextTabId,
       'untitledCounter': _state.untitledCounter,
       'tabs': tabsJson,
-      if (_state.lastProviderKey != null)
-        'lastProviderKey': _state.lastProviderKey,
-      if (_state.providerPrefs.isNotEmpty)
-        'providerPrefs': _state.providerPrefs,
+      if (_state.aiPrefs.isNotEmpty) 'aiPrefs': _state.aiPrefs,
     });
   }
 

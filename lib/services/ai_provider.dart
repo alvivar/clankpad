@@ -33,8 +33,7 @@ class AiModel {
   int get hashCode => Object.hash(provider, id);
 }
 
-/// Result of [AiProvider.fetchModels]: the filtered model list plus optional
-/// defaults suggested by the provider (e.g. Pi's live state via `get_state`).
+/// Pi's filtered model list plus optional defaults suggested by its live state.
 class AiProviderModels {
   final List<AiModel> models;
 
@@ -53,108 +52,64 @@ class AiProviderModels {
   });
 }
 
-/// Backend-agnostic interface for AI-assisted text editing.
+/// System prompt passed to Pi via `--system-prompt`. Frames the model as a
+/// text-editor assistant rather than a coding agent, whose default system
+/// prompt biases output toward code fences, tool usage, and verbose
+/// explanations. The per-request prompts built by [buildPromptMessage] still
+/// include `IMPORTANT:` contract lines as belt-and-suspenders.
 ///
-/// Supplies models and streams edited text. The UI layer ([EditorScreen])
-/// delegates requests to the selected provider.
-abstract class AiProvider {
-  /// Human-readable name shown in the provider picker (e.g. "Pi").
-  String get name;
+/// Kept as a single line (adjacent-string concatenation) so it can be passed
+/// through `Process.start` on Windows without multi-line argv quoting issues.
+const String systemPrompt =
+    'You are an assistant embedded in a text editor. '
+    "Your job is to transform text according to the user's instruction. "
+    'Return ONLY the requested output text. '
+    'Do not include explanations, preambles, commentary, or surrounding '
+    'markdown code fences unless the user explicitly asks for them. '
+    "Preserve the document's language, style, tone, formatting, "
+    'indentation, and structure unless the user asks to change them. '
+    'The document may contain prose, notes, markdown, lists, or code.';
 
-  /// Fetches available models (filtered and ready to display) plus optional
-  /// suggested defaults. Returns an empty [AiProviderModels] when the
-  /// provider does not expose a queryable model list.
-  Future<AiProviderModels> fetchModels();
+/// Sentinel marking the insertion point in insert-mode prompts. Pure ASCII
+/// and deliberately unlovely: it tokenises predictably across every model Pi
+/// can route to (including small/old ones) and never collides with real document
+/// text. The model is told never to echo it back.
+const String cursorMarker = '<<<CLANKPAD_CURSOR>>>';
 
-  /// Streams edited-text chunks for the given instruction.
-  ///
-  /// Completes normally when generation is finished.
-  /// Throws [AiProviderError] on process/network failure.
-  Stream<String> streamEdit({
-    required String documentText,
-    required String editTarget,
-    required String userInstruction,
-    String? modelProvider,
-    String? modelId,
-    String thinkingLevel = 'off',
-    int? insertOffset,
-  });
-
-  /// Cancels the in-flight request. Safe to call when idle (no-op).
-  void abort();
-
-  /// Releases all resources (kills subprocess, etc.).
-  Future<void> dispose();
-
-  /// Non-fatal warning from the most recent [streamEdit] call
-  /// (e.g. model switch was rejected but the prompt still ran).
-  String? get lastWarning;
-
-  // ── Shared prompt construction ────────────────────────────────────────────
-
-  /// System prompt passed to Pi via `--system-prompt`. Frames the model as a
-  /// text-editor assistant rather than a coding agent, whose default system
-  /// prompt biases output toward code fences,
-  /// tool usage, and verbose explanations. The per-request prompts built by
-  /// [buildPromptMessage] still include `IMPORTANT:` contract lines as
-  /// belt-and-suspenders.
-  ///
-  /// Kept as a single line (adjacent-string concatenation) so it can be
-  /// passed through `Process.start` on Windows without multi-line argv
-  /// quoting issues.
-  static const String systemPrompt =
-      'You are an assistant embedded in a text editor. '
-      "Your job is to transform text according to the user's instruction. "
-      'Return ONLY the requested output text. '
-      'Do not include explanations, preambles, commentary, or surrounding '
-      'markdown code fences unless the user explicitly asks for them. '
-      "Preserve the document's language, style, tone, formatting, "
-      'indentation, and structure unless the user asks to change them. '
-      'The document may contain prose, notes, markdown, lists, or code.';
-
-  /// Sentinel marking the insertion point in insert-mode prompts. Pure ASCII
-  /// and deliberately unlovely: it tokenises predictably across every model
-  /// Pi can route to (including small/old ones) and never collides with real
-  /// document text. The model is told never to echo it back.
-  static const String cursorMarker = '<<<CLANKPAD_CURSOR>>>';
-
-  /// Builds the prompt message sent to the model. Shared across all providers
-  /// because the editing contract (document + target + instruction) is the
-  /// same regardless of backend.
-  static String buildPromptMessage(
-    String documentText,
-    String editTarget,
-    String userInstruction, {
-    int? insertOffset,
-  }) {
-    if (editTarget.isEmpty) {
-      // Insert mode: embed a cursor marker so the model sees the full
-      // document as a coherent whole with a precise insertion point.
-      final offset = insertOffset ?? documentText.length;
-      final before = documentText.substring(0, offset);
-      final after = documentText.substring(offset);
-      return 'Document:\n'
-          '$before$cursorMarker$after\n'
-          '\n'
-          'Instruction: $userInstruction\n'
-          '\n'
-          'IMPORTANT: Reply with ONLY the text to insert at $cursorMarker. '
-          'The cursor marker is not part of the document; never include it in '
-          'your reply. Do not add leading/trailing blank lines unless required '
-          'to satisfy the instruction. No explanations, no preamble, no '
-          'markdown fences.';
-    }
-    return 'Full document context:\n'
-        '$documentText\n'
-        '\n'
-        'Edit target to replace (copied verbatim from the document above):\n'
-        '$editTarget\n'
+/// Builds the prompt message sent to the model.
+String buildPromptMessage(
+  String documentText,
+  String editTarget,
+  String userInstruction, {
+  int? insertOffset,
+}) {
+  if (editTarget.isEmpty) {
+    // Insert mode: embed a cursor marker so the model sees the full document as
+    // a coherent whole with a precise insertion point.
+    final offset = insertOffset ?? documentText.length;
+    final before = documentText.substring(0, offset);
+    final after = documentText.substring(offset);
+    return 'Document:\n'
+        '$before$cursorMarker$after\n'
         '\n'
         'Instruction: $userInstruction\n'
         '\n'
-        'IMPORTANT: Return ONLY the replacement for the Edit target. '
-        'Do not echo any surrounding document text. Preserve leading/trailing '
-        'whitespace and blank lines unless required to satisfy the '
-        'instruction. No explanations, no preamble, no markdown fences.';
+        'IMPORTANT: Reply with ONLY the text to insert at $cursorMarker. '
+        'The cursor marker is not part of the document; never include it in '
+        'your reply. Do not add leading/trailing blank lines unless required '
+        'to satisfy the instruction. No explanations, no preamble, no '
+        'markdown fences.';
   }
+  return 'Full document context:\n'
+      '$documentText\n'
+      '\n'
+      'Edit target to replace (copied verbatim from the document above):\n'
+      '$editTarget\n'
+      '\n'
+      'Instruction: $userInstruction\n'
+      '\n'
+      'IMPORTANT: Return ONLY the replacement for the Edit target. '
+      'Do not echo any surrounding document text. Preserve leading/trailing '
+      'whitespace and blank lines unless required to satisfy the instruction. '
+      'No explanations, no preamble, no markdown fences.';
 }

@@ -81,22 +81,14 @@ class _EditorScreenState extends State<EditorScreen> {
   // after accept / reject.
   final FocusNode _diffFocusNode = FocusNode();
 
-  // ── AI providers ─────────────────────────────────────────────────────────────
+  // ── AI provider ──────────────────────────────────────────────────────────────
 
-  // All registered providers. Processes are killed if the screen is disposed
-  // while a request is in-flight.
-  final Map<String, AiProvider> _providers = {'pi': PiProvider()};
-
-  late String _selectedProviderKey;
-
-  AiProvider get _activeProvider => _providers[_selectedProviderKey]!;
+  final _pi = PiProvider();
 
   // ── Model / thinking state ──────────────────────────────────────────────────
 
-  // Per-provider model cache — fetched once per provider, reused on switch-back.
-  final Map<String, List<AiModel>> _modelCache = {};
-  // Full fetch result (includes suggestions) — kept for switch-back seeding.
-  final Map<String, AiProviderModels> _fetchResultCache = {};
+  List<AiModel>? _cachedModels;
+  AiProviderModels? _cachedFetchResult;
 
   List<AiModel> _availableModels = [];
   bool _modelsLoading = false;
@@ -364,13 +356,6 @@ class _EditorScreenState extends State<EditorScreen> {
     super.initState();
     _state.addListener(_onEditorStateChanged);
 
-    // Seed provider selection from persisted state; fall back to 'pi'.
-    final persisted = _state.lastProviderKey;
-    _selectedProviderKey =
-        (persisted != null && _providers.containsKey(persisted))
-        ? persisted
-        : 'pi';
-
     // Show any session-restore notices (missing files, etc.) once the first
     // frame has been drawn so there is a valid BuildContext for the dialog.
     if (_state.hasStartupNotices) {
@@ -387,9 +372,7 @@ class _EditorScreenState extends State<EditorScreen> {
     _diffFocusNode.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
-    for (final p in _providers.values) {
-      p.dispose();
-    }
+    _pi.dispose();
     super.dispose();
   }
 
@@ -544,21 +527,18 @@ class _EditorScreenState extends State<EditorScreen> {
       controller.setEditTarget(highlight.start, highlight.end);
     }
 
-    _fetchModelsForActiveProvider();
+    _fetchModels();
   }
 
   // ── Model fetching ──────────────────────────────────────────────────────────
 
-  /// Fetches models for the active provider if not already cached.
-  /// Fire-and-forget from callers; silent on error because submit still works.
-  Future<void> _fetchModelsForActiveProvider() async {
-    final key = _selectedProviderKey;
-
-    // Already cached — apply and seed.
-    final cached = _modelCache[key];
-    if (cached != null && _availableModels.isNotEmpty) return;
+  /// Fetches models once. Failed fetches remain retryable on the next popup.
+  Future<void> _fetchModels() async {
+    final cached = _cachedModels;
     if (cached != null) {
-      _applyCachedModels(key, cached, _fetchResultCache[key]);
+      if (_availableModels.isEmpty) {
+        _applyCachedModels(cached, _cachedFetchResult);
+      }
       return;
     }
 
@@ -566,38 +546,31 @@ class _EditorScreenState extends State<EditorScreen> {
     setState(() => _modelsLoading = true);
 
     try {
-      final result = await _activeProvider.fetchModels();
-      if (!mounted || _selectedProviderKey != key) return;
-      _modelCache[key] = result.models;
-      _fetchResultCache[key] = result;
-      _applyCachedModels(key, result.models, result);
+      final result = await _pi.fetchModels();
+      if (!mounted) return;
+      _cachedModels = result.models;
+      _cachedFetchResult = result;
+      _applyCachedModels(result.models, result);
     } catch (_) {
-      if (mounted && _selectedProviderKey == key) {
-        setState(() => _modelsLoading = false);
-      }
+      if (mounted) setState(() => _modelsLoading = false);
     }
   }
 
-  /// Applies a model list and seeds selection from persisted prefs or provider
-  /// suggestions.
-  void _applyCachedModels(
-    String providerKey,
-    List<AiModel> models,
-    AiProviderModels? fetchResult,
-  ) {
-    // Seed model + thinking level from per-provider prefs. Priority:
-    //   1. Persisted preference for this provider (if model still exists)
-    //   2. Provider's suggested model (e.g. Pi's live state)
-    //   3. No selection — provider uses its configured default
+  /// Applies a model list and seeds selection from persisted preferences or
+  /// Pi's suggestions.
+  void _applyCachedModels(List<AiModel> models, AiProviderModels? fetchResult) {
+    // Seed model + thinking level. Priority:
+    //   1. Persisted preference (if the model still exists)
+    //   2. Pi's suggested model from its live state
+    //   3. No selection — Pi uses its configured default
     bool modelInList(String? provider, String? id) =>
         provider != null &&
         id != null &&
         models.any((m) => m.id == id && m.provider == provider);
 
-    final prefs = _state.providerPrefs[providerKey];
-    final prefProvider = prefs?['modelProvider'];
-    final prefModelId = prefs?['modelId'];
-    final prefThinking = prefs?['thinkingLevel'];
+    final prefProvider = _state.aiPrefs['modelProvider'];
+    final prefModelId = _state.aiPrefs['modelId'];
+    final prefThinking = _state.aiPrefs['thinkingLevel'];
 
     String? seedProvider;
     String? seedModelId;
@@ -711,13 +684,13 @@ class _EditorScreenState extends State<EditorScreen> {
     }
     _historyIndex = _promptHistory.length;
 
-    // Persist provider + model + thinking level so the next session starts
-    // with the same selection. setAiPrefs fires onAnyChange so the debounced
+    // Persist model + thinking level so the next session starts with the same
+    // selection. setAiPrefs fires onAnyChange so the debounced
     // session writer schedules a save.
     final prefs = <String, String>{'thinkingLevel': _thinkingLevel};
     if (_selectedProvider != null) prefs['modelProvider'] = _selectedProvider!;
     if (_selectedModelId != null) prefs['modelId'] = _selectedModelId!;
-    _state.setAiPrefs(_selectedProviderKey, prefs);
+    _state.setAiPrefs(prefs);
 
     setState(() {
       _aiPromptVisible = false;
@@ -732,7 +705,7 @@ class _EditorScreenState extends State<EditorScreen> {
     bool errored = false;
 
     try {
-      await for (final chunk in _activeProvider.streamEdit(
+      await for (final chunk in _pi.streamEdit(
         documentText: docText,
         editTarget: editTarget,
         userInstruction: prompt,
@@ -783,7 +756,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
       // Stream completed normally. Surface a non-fatal model-switch warning
       // if Pi rejected set_model / set_thinking_level (prompt still ran).
-      final switchErr = _activeProvider.lastWarning;
+      final switchErr = _pi.lastWarning;
       if (switchErr != null && mounted) {
         setState(() => _errorBanner = 'Model switch failed: $switchErr');
       }
@@ -819,7 +792,7 @@ class _EditorScreenState extends State<EditorScreen> {
   /// Aborts the in-flight Pi request and immediately unlocks the editor.
   /// Only valid while the loading state is active (before the diff opens).
   void _cancelAiRequest() {
-    _activeProvider.abort();
+    _pi.abort();
     setState(() {
       _aiStreaming = false;
       _editorReadOnly = false;
@@ -871,7 +844,7 @@ class _EditorScreenState extends State<EditorScreen> {
   void _rejectDiff() {
     // Abort Pi if the stream is still running (e.g. user rejects while
     // tokens are still arriving). No-op if the stream has already finished.
-    _activeProvider.abort();
+    _pi.abort();
     _snapshotTab.controller.clearEditTarget();
     _snapshotTabId = null;
     // Text is unchanged — no controller update needed.
@@ -918,9 +891,7 @@ class _EditorScreenState extends State<EditorScreen> {
         // Kill child processes before exit. main.dart's _exitApplication calls
         // exit(0), which bypasses the dispose chain — without this, the warm Pi
         // (Node) process is orphaned on Windows (no parent job object).
-        for (final p in _providers.values) {
-          await p.dispose();
-        }
+        await _pi.dispose();
         await widget.onExitRequested();
         return;
       }

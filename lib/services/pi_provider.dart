@@ -13,12 +13,12 @@ class _PiCommandRejected extends AiProviderError {
   const _PiCommandRejected(super.message);
 }
 
-/// [AiProvider] backed by Pi's RPC subprocess (`pi --mode rpc`).
+/// Pi backend using an RPC subprocess (`pi --mode rpc`).
 ///
 /// Pi is spawned on the first [fetchModels] or [streamEdit] call and kept alive
 /// between invocations. Pi owns all auth and model configuration — Clankpad
 /// has no API key management.
-class PiProvider implements AiProvider {
+class PiProvider {
   PiProvider({this.piExecutable = 'pi'});
 
   /// Executable name or absolute path. Defaults to `pi` (resolved via PATH).
@@ -49,15 +49,10 @@ class PiProvider implements AiProvider {
   // the stream ends to surface a non-fatal warning.
   String? _lastWarning;
 
-  @override
-  String get name => 'Pi';
-
-  @override
   String? get lastWarning => _lastWarning;
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
-  @override
   Future<AiProviderModels> fetchModels() async {
     await _ensureRunning();
 
@@ -165,7 +160,6 @@ class PiProvider implements AiProvider {
   ///
   /// Completes normally when `agent_end` is received — including after [abort].
   /// Throws [AiProviderError] on process launch failure or unrecoverable error.
-  @override
   Stream<String> streamEdit({
     required String documentText,
     required String editTarget,
@@ -226,7 +220,7 @@ class PiProvider implements AiProvider {
     _process!.stdin.writeln(
       jsonEncode({
         'type': 'prompt',
-        'message': AiProvider.buildPromptMessage(
+        'message': buildPromptMessage(
           documentText,
           editTarget,
           userInstruction,
@@ -309,7 +303,6 @@ class PiProvider implements AiProvider {
   ///
   /// Pi stops generation and emits `agent_end`, completing the stream normally.
   /// The process stays warm. Safe to call when no stream is active — no-op.
-  @override
   void abort() {
     final proc = _process;
     if (proc == null) return;
@@ -321,7 +314,6 @@ class PiProvider implements AiProvider {
 
   /// Cancels the stdout subscription, completes pending commands with an error,
   /// and kills Pi.
-  @override
   Future<void> dispose() async {
     for (final c in _pendingCommands.values) {
       c.completeError(const AiProviderError('Service disposed'));
@@ -358,7 +350,7 @@ class PiProvider implements AiProvider {
           '--no-skills',
           '--no-prompt-templates',
           '--system-prompt',
-          AiProvider.systemPrompt,
+          systemPrompt,
         ],
         // Required on Windows: the npm global install creates pi.cmd, not
         // pi.exe, and Process.start only resolves .cmd wrappers via the shell.
