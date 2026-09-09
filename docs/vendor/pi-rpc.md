@@ -883,9 +883,13 @@ Emitted when the agent completes. Contains all messages generated during this ru
 ```json
 {
   "type": "agent_end",
-  "messages": [...]
+  "messages": [...],
+  "willRetry": false
 }
 ```
+
+Check `willRetry` and the last assistant message's `stopReason` before treating
+the run as successful.
 
 ### turn_start / turn_end
 

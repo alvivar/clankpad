@@ -158,8 +158,8 @@ class PiProvider {
   /// the prompt could start before `set_model`/`new_session` commit, running
   /// on the previous session/model.
   ///
-  /// Completes normally when `agent_end` is received — including after [abort].
-  /// Throws [AiProviderError] on process launch failure or unrecoverable error.
+  /// Completes normally when Pi reports a successful answer or an [abort].
+  /// Throws [AiProviderError] on process launch failure or failed generation.
   Stream<String> streamEdit({
     required String documentText,
     required String editTarget,
@@ -269,17 +269,30 @@ class PiProvider {
           continue;
         }
 
-        // Clean completion — process stays warm.
         if (type == 'agent_end') {
+          final messages = (event['messages'] as List)
+              .cast<Map<String, dynamic>>();
+          Map<String, dynamic>? lastAssistant;
+          for (final message in messages.reversed) {
+            if (message['role'] == 'assistant') {
+              lastAssistant = message;
+              break;
+            }
+          }
+
+          final stopReason = lastAssistant?['stopReason'] as String?;
+          if (event['willRetry'] == true ||
+              (stopReason != 'stop' && stopReason != 'aborted')) {
+            final errorMessage = lastAssistant?['errorMessage'] as String?;
+            throw AiProviderError(
+              errorMessage != null && errorMessage.isNotEmpty
+                  ? errorMessage
+                  : 'Pi stopped: ${stopReason ?? 'unknown'}',
+            );
+          }
+
           agentEndReceived = true;
           break;
-        }
-
-        // All retries exhausted.
-        if (type == 'auto_retry_end' && event['success'] == false) {
-          throw const AiProviderError(
-            'Pi process exited unexpectedly — try again.',
-          );
         }
       }
     } finally {

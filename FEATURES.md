@@ -125,7 +125,6 @@ A lightweight settings system to back the features above.
 
 ## Known Defects
 
-- [ ] **Pi retry truncation** — partial output can be accepted as a complete AI diff because Clankpad stops at `agent_end`, which can precede retry, without inspecting an error stop reason.
 - [ ] **Pi context-file leakage** — user or project context files can contaminate the editor-specific system prompt because Pi appends them after `--system-prompt` and Clankpad inherits its working directory.
 - [ ] **Pi model filtering divergence** — valid `enabledModels` settings can silently be ignored because Clankpad's matcher lacks Pi's case-insensitive glob, bare-ID, and fuzzy matching semantics.
 - [ ] **Windows AI process leak** — closing Clankpad can leave Pi running because window-X does not dispose the provider and killing a `runInShell` `cmd.exe` wrapper leaves its Node child running (known fix shape: `taskkill /T` tree-kill + `exitApplication` funnel — see git history).
