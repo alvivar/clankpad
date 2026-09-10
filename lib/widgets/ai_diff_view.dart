@@ -293,10 +293,13 @@ Widget _buildDiffRow(
 ) {
   final theme = Theme.of(context);
   final colorScheme = theme.colorScheme;
-  // `late` keeps this free for keep/delete rows, which never read it.
+  // `late` keeps these colors uncomputed for rows that never read them.
   late final green = theme.brightness == Brightness.dark
       ? const Color(0xFF81C784) // Material green 300
       : const Color(0xFF388E3C); // Material green 700
+  late final deletedTokenBackground = theme.brightness == Brightness.dark
+      ? const Color(0xFFC67B6A).withValues(alpha: 0.35)
+      : const Color(0xFFB5573F).withValues(alpha: 0.25);
 
   final (marker, fg, bg) = switch (op.kind) {
     DiffKind.keep => (' ', colorScheme.onSurfaceVariant, Colors.transparent),
@@ -329,9 +332,7 @@ Widget _buildDiffRow(
                   style: span.kind == op.kind
                       ? TextStyle(
                           backgroundColor: op.kind == DiffKind.delete
-                              ? colorScheme.errorContainer.withValues(
-                                  alpha: 0.65,
-                                )
+                              ? deletedTokenBackground
                               : green.withValues(alpha: 0.35),
                         )
                       : null,
