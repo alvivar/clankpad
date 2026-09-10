@@ -125,7 +125,7 @@ A lightweight settings system to back the features above.
 
 ## Known Defects
 
-- [ ] **Windows AI process leak** — closing Clankpad can leave Pi running because window-X does not dispose the provider and killing a `runInShell` `cmd.exe` wrapper leaves its Node child running (known fix shape: `taskkill /T` tree-kill + `exitApplication` funnel — see git history).
+- [ ] **Windows Pi shutdown verification** — close paths do not consistently dispose Pi, but Pi 0.85.1 exits on stdin EOF; persistent leakage remains unconfirmed pending observation after window-X closes while idle or generating and after last-tab exit.
 
 ---
 
