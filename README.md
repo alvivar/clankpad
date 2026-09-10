@@ -2,6 +2,8 @@
 
 A minimalist, distraction-free plain-text editor with multi-tab support, hot-exit session restore, find, and inline AI editing. Built with Flutter for desktop, with Windows as the primary target.
 
+![Clankpad demo: tabs, Ctrl+K inline AI edit and streaming word-level diff](docs/clankpad-demo.gif)
+
 ---
 
 ## Requirements
