@@ -480,7 +480,9 @@ class PiProvider {
     for (final pattern in patterns) {
       // Split on '*', escape each literal segment, rejoin with '.*'.
       final segments = pattern.split('*').map(RegExp.escape).join('.*');
-      if (RegExp('^$segments\$').hasMatch(modelId)) return true;
+      if (RegExp('^$segments\$', caseSensitive: false).hasMatch(modelId)) {
+        return true;
+      }
     }
     return false;
   }
