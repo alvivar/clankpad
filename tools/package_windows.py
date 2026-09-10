@@ -133,9 +133,13 @@ How to run:
 2. Run clankpad.exe.
 
 Optional AI features:
-- Pi provider: install Node.js, then run:
-  npm install -g @earendil-works/pi-coding-agent
-  pi /login
+- Pi provider (verified with Pi 0.85.1):
+  1. Install Node.js, then run:
+     npm install -g @earendil-works/pi-coding-agent
+  2. Start Pi:
+     pi
+  3. Inside the interactive Pi session, type:
+     /login
 
 Notes:
 - This portable build does not require an installer.

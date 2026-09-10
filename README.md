@@ -10,13 +10,19 @@ A minimalist, distraction-free plain-text editor with multi-tab support, hot-exi
 
 - [Flutter SDK](https://docs.flutter.dev/get-started/install) (Dart SDK ^3.11.0)
 - Windows (primary target; macOS/Linux runners exist but are less tested)
-- Optional, for AI features: [Node.js](https://nodejs.org/) + [Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
+- Optional, for AI features: [Node.js](https://nodejs.org/) + [Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) (verified with Pi 0.85.1)
 
 Pi setup example:
 
 ```bash
 npm install -g @earendil-works/pi-coding-agent
-pi /login
+pi
+```
+
+Then, inside the interactive Pi session, type:
+
+```text
+/login
 ```
 
 ---
@@ -30,10 +36,14 @@ flutter pub get
 # Run in debug mode
 flutter run -d windows
 
-# Build a release executable
-flutter build windows
-# Output: build\windows\x64\runner\Release\clankpad.exe
+# Build a release bundle
+flutter build windows --release
+# Output folder: build\windows\x64\runner\Release
 ```
+
+Run `clankpad.exe` from the Release folder and keep that entire folder together: the executable depends on its adjacent DLLs and `data` directory.
+
+For a portable distribution ZIP, run `python tools/package_windows.py`. Python is optional for packaging and is not required to run Clankpad; the archive is written under `dist`.
 
 ---
 
@@ -90,6 +100,7 @@ Closing a dirty tab prompts:
 - `Tab` indents by 4 spaces; with no selection it inserts spaces to the next tab stop.
 - `Shift+Tab` outdents selected lines or the current line's indentation.
 - `Alt+↑` / `Alt+↓` moves the current line or selected block up/down one line.
+- `Ctrl+J` joins hard-wrapped lines within the selection, or throughout the current document when there is no selection.
 
 ---
 
@@ -177,6 +188,8 @@ The edit target is highlighted until the prompt is dismissed or the diff is acce
 | `Ctrl+P`      | Cycle model                                                      |
 | `Shift+Tab`   | Cycle thinking level when the effective model supports reasoning |
 
+When available, the popup footer provides mouse-selectable model and thinking-level dropdowns as alternatives to the keyboard shortcuts. The thinking selector appears only when the effective model supports reasoning.
+
 Prompt history is in-memory only and capped at 50 entries.
 
 ### Streaming and review
@@ -212,6 +225,7 @@ If an AI provider fails, Clankpad shows a dismissible error banner and unlocks t
 | `Ctrl+Shift+S` | Save As                       |
 | `Ctrl+F`       | Find                          |
 | `Ctrl+K`       | AI inline edit                |
+| `Ctrl+J`       | Join hard-wrapped lines        |
 | `Alt+↑`        | Move line/block up            |
 | `Alt+↓`        | Move line/block down          |
 | `Escape`       | Cancel AI request before diff |
@@ -225,10 +239,7 @@ If an AI provider fails, Clankpad shows a dismissible error banner and unlocks t
 
 ### AI diff review
 
-| Shortcut         | Action         |
-| ---------------- | -------------- |
-| `Ctrl+Enter`     | Accept AI edit |
-| `Ctrl+Backspace` | Reject AI edit |
+See [Streaming and review](#streaming-and-review) for AI diff behavior and the `Ctrl+Enter` (accept) / `Ctrl+Backspace` (reject) shortcuts.
 
 ---
 
