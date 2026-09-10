@@ -45,8 +45,10 @@ Clankpad's core differentiator. These ideas deepen the AI integration beyond sin
 - [ ] **AI chat sidebar (shortcut TBD)** — a persistent conversation panel alongside the editor. Unlike Ctrl+K (which is a single-shot edit), this is for back-and-forth: "explain this code", "what's the bug here?", "give me three alternatives". Responses stream into the panel; the user can copy or apply snippets into the editor. Keeps the editor clean while having a dialog.
 - [ ] **Copy as markdown code block** — select text, right-click or shortcut → copies as ` ```lang\n...\n``` ` with the language inferred from the file extension. Essential for pasting into AI agent prompts, GitHub issues, or chat.
 - [ ] **Paste as plain text (`Ctrl+Shift+V`)** — strip formatting when pasting from browsers, docs, etc. Always plain text. (Standard `Ctrl+V` already does this in a plain TextField, but worth making explicit if rich paste ever becomes an issue.)
+- [x] **AI diff: word-level highlighting** — single delete/insert line pairs emphasize changed word, whitespace, and punctuation tokens while preserving whole-row diff coloring.
 - [ ] **AI diff: partial accept** — in the unified diff view, let the user accept individual generated lines or hunks rather than all-or-nothing.
-- [ ] **AI diff: character-level highlighting** — highlight changed characters within a line rather than only marking the whole line; word-level whitespace/punctuation tokenization is superseded.
+- [ ] **AI diff: character-level highlighting** — refine changed tokens down to complete grapheme clusters rather than only emphasizing the whole token.
+- [ ] **AI diff: multiline intra-line pairing** — pair related lines inside larger change blocks; the current narrow version deliberately leaves those blocks as whole-row diffs.
 - [ ] **AI diff: side-by-side toggle** — must keep wrapped-line row heights aligned between the panes.
 
 Any future AI diff work must use pure-Dart LCS with no dependencies or cache, recomputing in `build()`.

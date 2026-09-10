@@ -8,7 +8,8 @@ import '../services/text_diff.dart';
 ///
 /// Renders a unified line-level diff (`git diff` style) of the original
 /// [editTarget] against the [proposed] replacement: deletes in red, inserts in
-/// green, unchanged context shown in full. Keyboard shortcuts per spec:
+/// green, and eligible single-line replacements emphasized by token. Unchanged
+/// context is shown in full. Keyboard shortcuts per spec:
 ///   Accept → Ctrl+Enter
 ///   Reject → Ctrl+Backspace
 ///
@@ -110,8 +111,10 @@ class _DiffCard extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final isInsert = editTarget.isEmpty;
     // Recomputed on every parent rebuild — i.e. once per streamed chunk.
-    // O(N·M) LCS; cheap for our scale. See `lib/services/text_diff.dart`.
+    // The line LCS is followed by at most 100k token-comparison cells; UI
+    // tokenization and layout are outside that budget.
     final ops = diffLines(editTarget, proposed);
+    final tokenSpans = _buildTokenSpans(ops);
 
     return Material(
       elevation: 6,
@@ -150,7 +153,10 @@ class _DiffCard extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 6),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [for (final op in ops) _buildDiffRow(context, op)],
+                  children: [
+                    for (var i = 0; i < ops.length; i++)
+                      _buildDiffRow(context, ops[i], tokenSpans[i]),
+                  ],
                 ),
               ),
             ),
@@ -184,9 +190,107 @@ class _DiffCard extends StatelessWidget {
 
 // ── Unified diff row ──────────────────────────────────────────────────────────
 
+const _tokenComparisonBudget = 100000;
+
+final _wordGrapheme = RegExp(r'[\p{Letter}\p{Number}_]', unicode: true);
+final _whitespaceGrapheme = RegExp(r'^\p{White_Space}+$', unicode: true);
+
+enum _TokenClass { word, whitespace, other }
+
+List<String> _tokenize(String line) {
+  final tokens = <String>[];
+  _TokenClass? runClass;
+  var run = StringBuffer();
+
+  void flushRun() {
+    if (runClass != null) {
+      tokens.add(run.toString());
+      run = StringBuffer();
+      runClass = null;
+    }
+  }
+
+  for (final grapheme in line.characters) {
+    final tokenClass = _whitespaceGrapheme.hasMatch(grapheme)
+        ? _TokenClass.whitespace
+        : _wordGrapheme.hasMatch(grapheme)
+        ? _TokenClass.word
+        : _TokenClass.other;
+    if (tokenClass == _TokenClass.other) {
+      flushRun();
+      tokens.add(grapheme);
+    } else if (tokenClass == runClass) {
+      run.write(grapheme);
+    } else {
+      flushRun();
+      runClass = tokenClass;
+      run.write(grapheme);
+    }
+  }
+  flushRun();
+  return tokens;
+}
+
+/// Refines only maximal change blocks containing one delete and one insert.
+Map<int, List<TokenDiffSpan>> _buildTokenSpans(List<DiffOp> ops) {
+  final result = <int, List<TokenDiffSpan>>{};
+  var remainingCells = _tokenComparisonBudget;
+  var blockStart = 0;
+
+  while (blockStart < ops.length) {
+    if (ops[blockStart].kind == DiffKind.keep) {
+      blockStart++;
+      continue;
+    }
+
+    var blockEnd = blockStart;
+    var deleteCount = 0;
+    var insertCount = 0;
+    var deleteIndex = -1;
+    var insertIndex = -1;
+    while (blockEnd < ops.length && ops[blockEnd].kind != DiffKind.keep) {
+      if (ops[blockEnd].kind == DiffKind.delete) {
+        deleteCount++;
+        deleteIndex = blockEnd;
+      } else {
+        insertCount++;
+        insertIndex = blockEnd;
+      }
+      blockEnd++;
+    }
+
+    if (deleteCount == 1 && insertCount == 1) {
+      final before = _tokenize(ops[deleteIndex].line);
+      final after = _tokenize(ops[insertIndex].line);
+      final cells = before.length * after.length;
+      if (cells > remainingCells) {
+        // Preserve this and every following pair as plain whole-row diffs.
+        break;
+      }
+      remainingCells -= cells;
+
+      final spans = diffTokens(before, after);
+      result[deleteIndex] = [
+        for (final span in spans)
+          if (span.kind != DiffKind.insert) span,
+      ];
+      result[insertIndex] = [
+        for (final span in spans)
+          if (span.kind != DiffKind.delete) span,
+      ];
+    }
+    blockStart = blockEnd;
+  }
+  return result;
+}
+
 /// Renders a single diff line: marker column plus content, full-row
 /// background tint by op kind.
-Widget _buildDiffRow(BuildContext context, DiffOp op) {
+Widget _buildDiffRow(
+  BuildContext context,
+  DiffOp op,
+  List<TokenDiffSpan>? tokenSpans,
+) {
   final theme = Theme.of(context);
   final colorScheme = theme.colorScheme;
   // `late` keeps this free for keep/delete rows, which never read it.
@@ -210,6 +314,34 @@ Widget _buildDiffRow(BuildContext context, DiffOp op) {
     height: 1.5,
   );
 
+  final content = tokenSpans == null
+      ? Text(
+          op.line,
+          style: baseStyle.copyWith(color: colorScheme.onSurface),
+          softWrap: true,
+        )
+      : Text.rich(
+          TextSpan(
+            children: [
+              for (final span in tokenSpans)
+                TextSpan(
+                  text: span.text,
+                  style: span.kind == op.kind
+                      ? TextStyle(
+                          backgroundColor: op.kind == DiffKind.delete
+                              ? colorScheme.errorContainer.withValues(
+                                  alpha: 0.65,
+                                )
+                              : green.withValues(alpha: 0.35),
+                        )
+                      : null,
+                ),
+            ],
+          ),
+          style: baseStyle.copyWith(color: colorScheme.onSurface),
+          softWrap: true,
+        );
+
   return ColoredBox(
     color: bg,
     child: Padding(
@@ -224,13 +356,7 @@ Widget _buildDiffRow(BuildContext context, DiffOp op) {
               style: baseStyle.copyWith(color: fg, fontWeight: FontWeight.w600),
             ),
           ),
-          Expanded(
-            child: Text(
-              op.line,
-              style: baseStyle.copyWith(color: colorScheme.onSurface),
-              softWrap: true,
-            ),
-          ),
+          Expanded(child: content),
         ],
       ),
     ),

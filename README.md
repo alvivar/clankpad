@@ -183,7 +183,7 @@ After submit:
 
 1. The editor becomes read-only.
 2. A thin progress indicator appears below the tab bar.
-3. The AI response streams into a unified line-level diff card with `+` / `-` markers and red/green highlighting.
+3. The AI response streams into a unified line-level diff card with `+` / `-` markers and red/green highlighting. Single-line replacements also emphasize changed word, whitespace, and punctuation tokens; larger change blocks remain whole-row diffs.
 4. The editor remains locked until you accept or reject.
 
 | Key              | Action         |
