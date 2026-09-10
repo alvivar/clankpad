@@ -365,6 +365,11 @@ class PiProvider {
           '--no-extensions',
           '--no-skills',
           '--no-prompt-templates',
+          // Prevent AGENTS.md and CLAUDE.md from augmenting the prompt.
+          '--no-context-files',
+          // Suppress APPEND_SYSTEM.md discovery without appending any text.
+          '--append-system-prompt',
+          '',
           '--system-prompt',
           systemPrompt,
         ],

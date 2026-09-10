@@ -152,7 +152,7 @@ On non-Windows platforms the fallback location is `./session.json`.
 
 `Ctrl+K` opens a floating prompt for AI-assisted text editing. Clankpad does not store API keys or call model APIs directly; it shells out to a local AI backend.
 
-Pi runs as a long-lived `pi --mode rpc` subprocess with a text-editor-specific system prompt and tools disabled.
+Pi runs as a long-lived `pi --mode rpc` subprocess with a text-editor-specific system prompt; tools and ambient context files are disabled.
 
 ### Edit target behavior
 
