@@ -123,9 +123,9 @@ A lightweight settings system to back the features above.
 
 ---
 
-## Known Defects
+## Windows Pi shutdown observation
 
-- [ ] **Windows Pi shutdown verification** — close paths do not consistently dispose Pi, but Pi 0.85.1 exits on stdin EOF; persistent leakage remains unconfirmed pending observation after window-X closes while idle or generating and after last-tab exit.
+On 2026-09-09 with Pi 0.85.1, no attributable Pi process remained after closing the window while idle or generating, or after closing the last tab while idle. Closing the last tab during generation was blocked by the interface and therefore not tested. These delayed observations do not measure exact shutdown latency or prove universal leak freedom.
 
 ---
 
