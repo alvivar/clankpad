@@ -27,12 +27,20 @@ typedef PiProcessStarter =
 /// between invocations. Pi owns all auth and model configuration — Clankpad
 /// has no API key management.
 class PiProvider {
-  PiProvider({this.piExecutable = 'pi', PiProcessStarter? startProcess})
-    : _startProcess = startProcess ?? Process.start;
+  PiProvider({
+    this.piExecutable = 'pi',
+    PiProcessStarter? startProcess,
+    File? settingsFile,
+  }) : _startProcess = startProcess ?? Process.start,
+       _settingsFile = settingsFile;
 
   /// Executable name or absolute path. Defaults to `pi` (resolved via PATH).
   final String piExecutable;
   final PiProcessStarter _startProcess;
+
+  // Pi's global settings file; null resolves it from the environment on each
+  // fetch. Tests pass a temporary file.
+  final File? _settingsFile;
 
   Process? _process;
 
@@ -76,20 +84,28 @@ class PiProvider {
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
+  /// Returns Pi's models, filtered by `enabledModels` when that is set.
+  ///
+  /// Throws [AiProviderError] instead of broadening the list: when the
+  /// settings file is unreadable or malformed, when no model matches the
+  /// filter, or when Pi reports no models at all.
   Future<AiProviderModels> fetchModels() async {
+    // Read the filter first so a broken settings file is reported without
+    // spawning Pi.
+    final patterns = await loadEnabledModelPatterns(
+      _settingsFile ?? piSettingsFile(Platform.environment),
+    );
     await _ensureRunning();
 
-    final results = await Future.wait<dynamic>([
+    final results = await Future.wait([
       sendCommand({'type': 'get_available_models'}),
-      // get_state is best-effort — wrap so a failure doesn't poison
+      // get_state only seeds suggestions — wrap so a failure doesn't poison
       // the whole Future.wait and leave the model list empty.
       sendCommand({'type': 'get_state'}).catchError((_) => <String, dynamic>{}),
-      loadEnabledModelPatterns(),
     ]);
 
-    final modelsResp = results[0] as Map<String, dynamic>;
-    final stateResp = results[1] as Map<String, dynamic>;
-    final patterns = results[2] as List<String>?;
+    final modelsResp = results[0];
+    final stateResp = results[1];
 
     final all = (modelsResp['data']['models'] as List)
         .cast<Map<String, dynamic>>()
@@ -103,17 +119,26 @@ class PiProvider {
         )
         .toList();
 
-    // Apply enabledModels filter from ~/.pi/agent/settings.json.
-    // Fall back to full list if patterns are null/empty or every
-    // model is excluded (avoids a blank dropdown on bad config).
-    final filtered = (patterns != null && patterns.isNotEmpty)
+    if (all.isEmpty) {
+      throw const AiProviderError(
+        'Pi reported no available models. Run pi and use /login to set up '
+        'a provider.',
+      );
+    }
+    final models = patterns == null
         ? all
+        : all
               .where(
                 (m) => matchesEnabledPattern('${m.provider}/${m.id}', patterns),
               )
-              .toList()
-        : all;
-    final models = filtered.isNotEmpty ? filtered : all;
+              .toList();
+    if (models.isEmpty) {
+      throw AiProviderError(
+        'No available Pi model matches enabledModels '
+        '${jsonEncode(patterns)}. Clankpad supports case-insensitive '
+        '"provider/id" patterns where * matches any characters.',
+      );
+    }
 
     // Extract Pi's live state for seeding suggestions.
     final stateData = stateResp['data'] as Map<String, dynamic>?;
@@ -533,30 +558,61 @@ class PiProvider {
 
   // ── enabledModels filtering ─────────────────────────────────────────────────
 
-  /// Reads `~/.pi/agent/settings.json` and returns the `enabledModels` list,
-  /// or `null` if the file is absent, malformed, or the key is missing/empty.
-  /// Never throws — callers treat `null` as "show all models".
-  static Future<List<String>?> loadEnabledModelPatterns() async {
-    try {
-      final home =
-          Platform.environment['USERPROFILE'] ?? // Windows
-          Platform.environment['HOME']; // macOS / Linux
-      if (home == null) return null;
-      final file = File('$home/.pi/agent/settings.json');
-      if (!await file.exists()) return null;
-      final json =
-          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
-      final raw = json['enabledModels'];
-      if (raw is! List || raw.isEmpty) return null;
-      return raw.cast<String>();
-    } catch (_) {
-      return null;
+  /// Pi's global settings file, `<home>/.pi/agent/settings.json`, where home
+  /// is `USERPROFILE` (Windows) or `HOME`. Throws when neither is set: the
+  /// filter cannot be found, which is not the same as having none.
+  static File piSettingsFile(Map<String, String> environment) {
+    final home = environment['USERPROFILE'] ?? environment['HOME'];
+    if (home == null) {
+      throw const AiProviderError(
+        "Can't locate Pi's settings: neither USERPROFILE nor HOME is set.",
+      );
     }
+    return File('$home/.pi/agent/settings.json');
   }
 
-  /// Returns `true` if [modelId] matches any of [patterns].
-  /// Glob rules: `*` matches any sequence of characters; everything else is
-  /// treated as a literal (including `/`).
+  /// Reads the `enabledModels` filter from Pi's settings [file].
+  ///
+  /// Returns null (no filter) when the file is absent or `enabledModels` is
+  /// missing, null or empty — an empty list means no filter in Pi as well.
+  /// Throws [AiProviderError] when the path exists but cannot be read as a
+  /// file (e.g. it is a directory), is not a JSON object, or `enabledModels` is not a list of strings.
+  static Future<List<String>?> loadEnabledModelPatterns(File file) async {
+    final String raw;
+    try {
+      raw = await file.readAsString();
+    } on PathNotFoundException {
+      return null;
+    } on FileSystemException catch (e) {
+      // Includes a directory at the settings path: present but not readable.
+      throw AiProviderError('Could not read ${file.path}: ${e.message}');
+    }
+
+    final Object? json;
+    try {
+      json = jsonDecode(raw);
+    } on FormatException catch (e) {
+      throw AiProviderError('${file.path} is not valid JSON: ${e.message}');
+    }
+    if (json is! Map<String, dynamic>) {
+      throw AiProviderError('${file.path} must contain a JSON object.');
+    }
+
+    final enabled = json['enabledModels'];
+    if (enabled == null) return null;
+    if (enabled is! List || enabled.any((p) => p is! String)) {
+      throw AiProviderError(
+        'enabledModels in ${file.path} must be a list of strings.',
+      );
+    }
+    return enabled.isEmpty ? null : enabled.cast<String>();
+  }
+
+  /// Returns `true` if [modelId] (`provider/id`) matches any of [patterns].
+  ///
+  /// This is Clankpad's subset of Pi's pattern syntax: case-insensitive, `*`
+  /// matches any sequence of characters, and everything else is literal
+  /// (including `/`). Other Pi pattern forms match nothing here.
   static bool matchesEnabledPattern(String modelId, List<String> patterns) {
     for (final pattern in patterns) {
       // Split on '*', escape each literal segment, rejoin with '.*'.

@@ -127,7 +127,114 @@ void main() {
     _expectReleased(failed);
     expect(await _request(provider), ['replacement']);
   });
+
+  group('fetchModels', () {
+    late Directory temp;
+    late File settings;
+    var starts = 0;
+
+    setUp(() {
+      temp = Directory.systemTemp.createTempSync('clankpad_pi_settings');
+      settings = File('${temp.path}${Platform.pathSeparator}settings.json');
+      starts = 0;
+    });
+    tearDown(() => temp.deleteSync(recursive: true));
+
+    Future<List<String>> fetch({List<Map<String, dynamic>>? models}) async {
+      final provider = PiProvider(
+        settingsFile: settings,
+        startProcess: (executable, arguments, {required runInShell}) async {
+          starts++;
+          return _FakeProcess(models: models ?? _models);
+        },
+      );
+      addTearDown(provider.dispose);
+      final result = await provider.fetchModels().timeout(
+        const Duration(seconds: 1),
+      );
+      return [for (final m in result.models) '${m.provider}/${m.id}'];
+    }
+
+    Matcher failsWith(String message) => throwsA(
+      isA<AiProviderError>().having(
+        (e) => e.message,
+        'message',
+        contains(message),
+      ),
+    );
+
+    test('absent settings or filter shows every model', () async {
+      expect(await fetch(), ['anthropic/claude', 'openai/gpt']);
+      // Missing parent directories (no ~/.pi/agent yet) are absence too.
+      final original = settings;
+      settings = File('${temp.path}/missing/agent/settings.json');
+      expect(await fetch(), ['anthropic/claude', 'openai/gpt']);
+      settings = original;
+      for (final json in [
+        '{}',
+        '{"enabledModels": null}',
+        '{"enabledModels": []}',
+      ]) {
+        settings.writeAsStringSync(json);
+        expect(await fetch(), ['anthropic/claude', 'openai/gpt'], reason: json);
+      }
+    });
+
+    test('patterns match provider/id case-insensitively with *', () async {
+      settings.writeAsStringSync('{"enabledModels": ["ANTHROPIC/*"]}');
+      expect(await fetch(), ['anthropic/claude']);
+    });
+
+    test('a filter matching nothing fails instead of showing all', () async {
+      settings.writeAsStringSync('{"enabledModels": ["claude"]}');
+      await expectLater(fetch(), failsWith('No available Pi model matches'));
+    });
+
+    test('malformed or unreadable settings fail without spawning Pi', () async {
+      final cases = {
+        'not json': 'is not valid JSON',
+        '[]': 'must contain a JSON object',
+        '{"enabledModels": "anthropic/*"}': 'must be a list of strings',
+        '{"enabledModels": ["anthropic/*", 1]}': 'must be a list of strings',
+      };
+      for (final MapEntry(key: json, value: message) in cases.entries) {
+        settings.writeAsStringSync(json);
+        await expectLater(fetch(), failsWith(message), reason: json);
+      }
+      // Not valid UTF-8.
+      settings.writeAsBytesSync([0xFF, 0xFE, 0xFD]);
+      await expectLater(fetch(), failsWith('Could not read'));
+      // A directory where the file should be is present, not absent.
+      settings.deleteSync();
+      Directory(settings.path).createSync();
+      await expectLater(fetch(), failsWith('Could not read ${settings.path}'));
+      expect(starts, 0);
+    });
+
+    test('Pi without models fails', () async {
+      await expectLater(
+        fetch(models: const []),
+        failsWith('Pi reported no available models'),
+      );
+    });
+
+    test('settings location requires a home directory', () {
+      expect(
+        PiProvider.piSettingsFile({'HOME': '/home/me'}).path,
+        '/home/me/.pi/agent/settings.json',
+      );
+      expect(
+        () => PiProvider.piSettingsFile({}),
+        throwsA(isA<AiProviderError>()),
+      );
+    });
+  });
 }
+
+const _models = [
+  {'provider': 'anthropic', 'id': 'claude', 'name': 'Claude'},
+  {'provider': 'openai', 'id': 'gpt', 'name': 'GPT'},
+];
 
 Future<List<String>> _request(PiProvider provider) => provider
     .streamEdit(
@@ -189,6 +296,7 @@ class _FakeProcess implements Process {
     this.exitDuringSetupFlush = false,
     this.holdPromptFlush = false,
     this.deferResponseFor,
+    this.models = _models,
   }) {
     input = _FakeInput(
       onCommand: _handleCommand,
@@ -202,6 +310,7 @@ class _FakeProcess implements Process {
   final bool rejectSession;
   final bool ignoreSession;
   final bool exitDuringSetupFlush;
+  final List<Map<String, dynamic>> models;
   bool holdPromptFlush;
   String? deferResponseFor;
   Map<String, dynamic>? _deferred;
@@ -287,6 +396,7 @@ class _FakeProcess implements Process {
       'command': type,
       'success': !(type == 'new_session' && rejectSession),
       if (type == 'new_session' && rejectSession) 'error': 'Session rejected',
+      if (type == 'get_available_models') 'data': {'models': models},
     });
   }
 

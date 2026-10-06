@@ -43,6 +43,41 @@ void main() {
     await pi.finishAll(tester);
   });
 
+  testWidgets('model fetch failure is shown, blocks submit and retries', (
+    tester,
+  ) async {
+    final pi = await _pumpEditor(tester);
+    pi.fetchErrors.add(const AiProviderError('enabledModels is broken.'));
+
+    await _pressCtrlK(tester);
+    expect(
+      find.text(
+        "Couldn't load Pi models: enabledModels is broken. "
+        '— close the prompt with Esc, then press Ctrl+K to retry.',
+      ),
+      findsOneWidget,
+    );
+    await tester.enterText(_promptField, 'edit');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(pi.requests, isEmpty);
+    expect(find.byType(AiPromptPopup), findsOneWidget);
+
+    // As the banner says: Ctrl+K alone does nothing while the prompt is open;
+    // Esc, then Ctrl+K retries.
+    await _pressCtrlK(tester);
+    expect(pi.fetchCount, 1);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    await _submit(tester, 'edit');
+
+    expect(pi.fetchCount, 2);
+    expect(find.textContaining("Couldn't load Pi models"), findsNothing);
+    expect(pi.requests, hasLength(1));
+    expect(pi.lastModelId, 'model');
+    await pi.finishAll(tester);
+  });
+
   testWidgets('cancel blocks resubmit until the old request terminates', (
     tester,
   ) async {
@@ -159,13 +194,14 @@ Future<void> _pressCtrlK(WidgetTester tester) async {
   await tester.pump();
 }
 
+final _promptField = find.descendant(
+  of: find.byType(AiPromptPopup),
+  matching: find.byType(TextField),
+);
+
 Future<void> _submit(WidgetTester tester, String prompt) async {
   await _pressCtrlK(tester);
-  final field = find.descendant(
-    of: find.byType(AiPromptPopup),
-    matching: find.byType(TextField),
-  );
-  await tester.enterText(field, prompt);
+  await tester.enterText(_promptField, prompt);
   await tester.sendKeyEvent(LogicalKeyboardKey.enter);
   await tester.pump();
 }
@@ -186,9 +222,19 @@ String _activeText(WidgetTester tester) {
 class _FakePi extends PiProvider {
   final requests = <StreamController<String>>[];
   var abortCount = 0;
+  var fetchCount = 0;
+  // Thrown by the next fetches, in order.
+  final fetchErrors = <Object>[];
+  String? lastModelId;
 
   @override
-  Future<AiProviderModels> fetchModels() async => const AiProviderModels();
+  Future<AiProviderModels> fetchModels() async {
+    fetchCount++;
+    if (fetchErrors.isNotEmpty) throw fetchErrors.removeAt(0);
+    return const AiProviderModels(
+      models: [AiModel(provider: 'test', id: 'model', name: 'Model')],
+    );
+  }
 
   @override
   Stream<String> streamEdit({
@@ -200,6 +246,7 @@ class _FakePi extends PiProvider {
     String thinkingLevel = 'off',
     int? insertOffset,
   }) {
+    lastModelId = modelId;
     final request = StreamController<String>();
     requests.add(request);
     return request.stream;

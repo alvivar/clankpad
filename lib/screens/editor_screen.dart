@@ -566,7 +566,8 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // ── Model fetching ──────────────────────────────────────────────────────────
 
-  /// Fetches models once. Failed fetches remain retryable on the next popup.
+  /// Fetches models once. A failure is shown in the error banner and retried
+  /// the next time the prompt opens.
   Future<void> _fetchModels() async {
     final cached = _cachedModels;
     if (cached != null) {
@@ -584,9 +585,17 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) return;
       _cachedModels = result.models;
       _cachedFetchResult = result;
+      // Submit needs loaded models, so the banner can only hold an earlier
+      // model-load error, which this retry resolved.
+      _errorBanner = null;
       _applyCachedModels(result.models, result);
-    } catch (_) {
-      if (mounted) setState(() => _modelsLoading = false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _modelsLoading = false;
+        _errorBanner =
+            "Couldn't load Pi models: $e — close the prompt with Esc, then press Ctrl+K to retry.";
+      });
     }
   }
 
@@ -692,6 +701,10 @@ class _EditorScreenState extends State<EditorScreen> {
     // The popup remains mounted until the next frame, so its callback can fire
     // again after the first submission has hidden it and started a request.
     if (!_aiPromptVisible || _aiRequestRunning) return;
+    // Every request names a model shown in the popup; there is no fallback to
+    // Pi's default. While the list loads, or after it failed (see the error
+    // banner), Enter does nothing.
+    if (_availableModels.isEmpty) return;
 
     // Auto-select paragraph when cursor has no selection.
     if (_snapshotSelection.isCollapsed) {

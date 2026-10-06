@@ -190,6 +190,12 @@ The edit target is highlighted until the prompt is dismissed or the diff is acce
 
 When available, the popup footer provides mouse-selectable model and thinking-level dropdowns as alternatives to the keyboard shortcuts. The thinking selector appears only when the effective model supports reasoning.
 
+### Model list
+
+The models come from Pi. If Pi's global settings file (`~/.pi/agent/settings.json`; on Windows `%USERPROFILE%\.pi\agent\settings.json`) has a non-empty `enabledModels` list, only matching models are offered. Clankpad supports a subset of Pi's pattern syntax: each pattern is compared case-insensitively with the full `provider/id`, `*` matches any characters, and every other character is literal. Other Pi pattern forms, such as a bare model id, match nothing. A missing file, a missing or `null` key, or an empty list means no filter.
+
+If the model list cannot be loaded, the error banner says why and the prompt cannot be submitted. This happens when Pi fails, when the settings file is unreadable (including a directory at that path) or not a JSON object, when `enabledModels` is not a list of strings, when no model matches the filter, or when Pi has no available models. A model-list failure never falls back to the unfiltered list or to Pi's default model. Fix the cause, close the prompt with `Esc`, then press `Ctrl+K` to retry.
+
 Prompt history is in-memory only and capped at 50 entries.
 
 ### Streaming and review
