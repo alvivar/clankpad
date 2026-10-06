@@ -9,6 +9,10 @@ class EditorTabBar extends StatelessWidget {
   final ValueChanged<int> onTabTap;
   final ValueChanged<int> onTabClose;
   final VoidCallback onNewTab;
+  // Called with the tab's old index and its new index after removal.
+  final void Function(int from, int to) onTabMove;
+  // Whether tabs can be dragged to a new position.
+  final bool canReorder;
 
   const EditorTabBar({
     super.key,
@@ -17,6 +21,8 @@ class EditorTabBar extends StatelessWidget {
     required this.onTabTap,
     required this.onTabClose,
     required this.onNewTab,
+    required this.onTabMove,
+    required this.canReorder,
   });
 
   @override
@@ -35,18 +41,23 @@ class EditorTabBar extends StatelessWidget {
               behavior: ScrollConfiguration.of(
                 context,
               ).copyWith(scrollbars: false),
-              child: SingleChildScrollView(
+              // The drag starts only once the pointer moves past the slop, so
+              // clicks still select and close tabs; dragging never selects.
+              child: ReorderableListView.builder(
                 scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    for (int i = 0; i < tabs.length; i++)
-                      EditorTabItem(
-                        tab: tabs[i],
-                        isActive: i == activeTabIndex,
-                        onTap: () => onTabTap(i),
-                        onClose: () => onTabClose(i),
-                      ),
-                  ],
+                buildDefaultDragHandles: false,
+                itemCount: tabs.length,
+                onReorderItem: onTabMove,
+                itemBuilder: (context, i) => ReorderableDragStartListener(
+                  key: ValueKey(tabs[i].id),
+                  index: i,
+                  enabled: canReorder,
+                  child: EditorTabItem(
+                    tab: tabs[i],
+                    isActive: i == activeTabIndex,
+                    onTap: () => onTabTap(i),
+                    onClose: () => onTabClose(i),
+                  ),
                 ),
               ),
             ),

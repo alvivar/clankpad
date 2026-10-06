@@ -8,6 +8,7 @@ import 'package:clankpad/widgets/ai_diff_view.dart';
 import 'package:clankpad/widgets/ai_prompt_popup.dart';
 import 'package:clankpad/widgets/editor_area.dart';
 import 'package:clankpad/widgets/find_bar.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -299,6 +300,32 @@ void main() {
     expect(pi.abortCount, 1);
   });
 
+  testWidgets('tabs cannot be reordered during an AI phase', (tester) async {
+    final state = EditorState()..newTab();
+    await _pumpEditor(tester, state: state);
+    final tabs = [...state.tabs];
+
+    // A drag that started before the prompt opened is not applied. Pressing a
+    // tab unfocuses the editor; refocus it as a structural change (such as a
+    // save completing) would, so Ctrl+K reaches the screen mid-drag.
+    var drag = await _startTabDrag(tester, 'Untitled 1');
+    _editorFocusNode(tester).requestFocus();
+    await _pressCtrlK(tester);
+    await drag.up();
+    await tester.pumpAndSettle();
+    expect(find.byType(AiPromptPopup), findsOneWidget);
+    expect(state.tabs, tabs);
+
+    // While the prompt is open, a drag does not even start: the tab does not
+    // follow the pointer.
+    final start = tester.getCenter(find.text('Untitled 1'));
+    drag = await _startTabDrag(tester, 'Untitled 1');
+    expect(tester.getCenter(find.text('Untitled 1')), start);
+    await drag.up();
+    await tester.pumpAndSettle();
+    expect(state.tabs, tabs);
+  });
+
   testWidgets('accept fails explicitly when the original tab is gone', (
     tester,
   ) async {
@@ -407,6 +434,20 @@ Future<void> _sendShortcut(
   if (control) await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
   if (alt) await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
   await tester.pump();
+}
+
+// Presses on the tab titled [title] and drags it past the next tab.
+Future<TestGesture> _startTabDrag(WidgetTester tester, String title) async {
+  final gesture = await tester.startGesture(
+    tester.getCenter(find.text(title)),
+    kind: PointerDeviceKind.mouse,
+  );
+  await tester.pump();
+  for (var i = 0; i < 2; i++) {
+    await gesture.moveBy(const Offset(150, 0));
+    await tester.pump();
+  }
+  return gesture;
 }
 
 Future<void> _submit(WidgetTester tester, String prompt) async {

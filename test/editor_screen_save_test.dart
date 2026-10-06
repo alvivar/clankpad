@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:clankpad/models/editor_tab.dart';
 import 'package:clankpad/screens/editor_screen.dart';
 import 'package:clankpad/state/editor_state.dart';
+import 'package:clankpad/widgets/editor_tab_item.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -68,6 +69,34 @@ void main() {
     expect(state.tabs, [b]);
     _expectUntouched(b, 'b', isDirty: false);
     expect(find.text('Save failed'), findsNothing);
+  });
+
+  testWidgets('closing with save closes its tab after a reorder', (
+    tester,
+  ) async {
+    final state = EditorState();
+    final a = _openFile(state, 'a');
+    final b = _openFile(state, 'b');
+    a.controller.text = 'a edited';
+    await _pumpEditor(tester, state);
+
+    await tester.tap(
+      find.descendant(
+        of: find.widgetWithText(EditorTabItem, 'a.txt'),
+        matching: find.byTooltip('Close tab'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(writes.pending.single.path, '${_root}a.txt');
+
+    state.moveTab(0, 1);
+    writes.completeAll();
+    await tester.pumpAndSettle();
+
+    expect(state.tabs, [b]);
+    _expectUntouched(b, 'b', isDirty: false);
   });
 }
 

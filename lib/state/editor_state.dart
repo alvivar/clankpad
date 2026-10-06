@@ -143,6 +143,16 @@ class EditorState extends ChangeNotifier {
     _structuralChange();
   }
 
+  // Moves the tab at [from] so it ends up at [to] (indices as after removal).
+  // The active tab stays active, whatever its new index.
+  void moveTab(int from, int to) {
+    if (from == to) return;
+    final active = _tabs[_activeTabIndex];
+    _tabs.insert(to, _tabs.removeAt(from));
+    _activeTabIndex = _tabs.indexOf(active);
+    _structuralChange();
+  }
+
   void switchTab(int index) {
     if (index == _activeTabIndex) return;
     _activeTabIndex = index;

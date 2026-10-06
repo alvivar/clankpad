@@ -907,8 +907,6 @@ class _EditorScreenState extends State<EditorScreen> {
           case _DirtyChoice.cancel:
             return;
           case _DirtyChoice.save:
-            // _closingTab blocks the only tab-removal path, so the index used
-            // below still identifies this tab after the save.
             final saved = await _saveTab(tab);
             if (!saved) return; // save failed or cancelled → keep tab open
           case _DirtyChoice.dontSave:
@@ -916,7 +914,10 @@ class _EditorScreenState extends State<EditorScreen> {
         }
       }
 
-      if (_shouldExitOnCloseTab(index)) {
+      // Tabs can be reordered during the dialog or save, so look the tab up
+      // again. It is still open: _closingTab blocks the only removal path.
+      final currentIndex = _state.tabs.indexOf(tab);
+      if (_shouldExitOnCloseTab(currentIndex)) {
         // Kill child processes before exit. main.dart's _exitApplication calls
         // exit(0), which bypasses the dispose chain — without this, the warm Pi
         // (Node) process is orphaned on Windows (no parent job object).
@@ -925,7 +926,7 @@ class _EditorScreenState extends State<EditorScreen> {
         return;
       }
 
-      _state.forceCloseTab(index);
+      _state.forceCloseTab(currentIndex);
     } finally {
       _closingTab = false;
     }
@@ -1080,6 +1081,11 @@ class _EditorScreenState extends State<EditorScreen> {
                 },
                 onNewTab: () {
                   if (!_aiActive) _state.newTab();
+                },
+                canReorder: !_aiActive,
+                // A drag may already be in flight when an AI phase starts.
+                onTabMove: (from, to) {
+                  if (!_aiActive) _state.moveTab(from, to);
                 },
               ),
 
