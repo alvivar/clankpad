@@ -107,13 +107,15 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // ── Model / thinking state ──────────────────────────────────────────────────
 
-  List<AiModel>? _cachedModels;
-  AiProviderModels? _cachedFetchResult;
-
-  List<AiModel> _availableModels = [];
+  // Pi's model list, fetched once per session; null until it loads.
+  AiProviderModels? _loadedModels;
+  List<AiModel> get _availableModels => _loadedModels?.models ?? const [];
   bool _modelsLoading = false;
+  // Null until the models load; then always a listed model.
   String? _selectedProvider;
-  String? _selectedModelId; // null = let provider use its configured default
+  String? _selectedModelId;
+  // Always one of the popup's levels: Pi and persisted values are normalised
+  // by [_normaliseLevel] when the models load.
   String _thinkingLevel = 'off';
 
   /// Maps Pi's full thinking-level range to the four values shown in the UI.
@@ -569,26 +571,16 @@ class _EditorScreenState extends State<EditorScreen> {
   /// Fetches models once. A failure is shown in the error banner and retried
   /// the next time the prompt opens.
   Future<void> _fetchModels() async {
-    final cached = _cachedModels;
-    if (cached != null) {
-      if (_availableModels.isEmpty) {
-        _applyCachedModels(cached, _cachedFetchResult);
-      }
-      return;
-    }
-
-    if (_modelsLoading) return;
+    if (_loadedModels != null || _modelsLoading) return;
     setState(() => _modelsLoading = true);
 
     try {
       final result = await _pi.fetchModels();
       if (!mounted) return;
-      _cachedModels = result.models;
-      _cachedFetchResult = result;
       // Submit needs loaded models, so the banner can only hold an earlier
       // model-load error, which this retry resolved.
       _errorBanner = null;
-      _applyCachedModels(result.models, result);
+      _applyModels(result);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -599,55 +591,36 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
-  /// Applies a model list and seeds selection from persisted preferences or
-  /// Pi's suggestions.
-  void _applyCachedModels(List<AiModel> models, AiProviderModels? fetchResult) {
-    // Seed model + thinking level. Priority:
-    //   1. Persisted preference (if the model still exists)
-    //   2. Pi's suggested model from its live state
-    //   3. No selection — Pi uses its configured default
-    bool modelInList(String? provider, String? id) =>
-        provider != null &&
-        id != null &&
-        models.any((m) => m.id == id && m.provider == provider);
-
-    final prefProvider = _state.aiPrefs['modelProvider'];
-    final prefModelId = _state.aiPrefs['modelId'];
-    final prefThinking = _state.aiPrefs['thinkingLevel'];
-
-    String? seedProvider;
-    String? seedModelId;
-    if (modelInList(prefProvider, prefModelId)) {
-      seedProvider = prefProvider;
-      seedModelId = prefModelId;
-    } else if (fetchResult != null &&
-        modelInList(
-          fetchResult.suggestedProvider,
-          fetchResult.suggestedModelId,
-        )) {
-      seedProvider = fetchResult.suggestedProvider;
-      seedModelId = fetchResult.suggestedModelId;
+  /// Stores Pi's model list and seeds the selection.
+  ///
+  /// Model: the persisted preference if it is still listed, else Pi's current
+  /// model if listed, else the first model ([PiProvider.fetchModels] never
+  /// returns an empty list). Thinking level: the persisted preference, else
+  /// Pi's current level.
+  void _applyModels(AiProviderModels result) {
+    final models = result.models;
+    AiModel? listed(String? provider, String? id) {
+      for (final m in models) {
+        if (m.provider == provider && m.id == id) return m;
+      }
+      return null;
     }
 
-    // Thinking level: persisted preference, then provider suggestion.
-    final suggestedLevel = fetchResult?.suggestedThinkingLevel ?? 'off';
-    final seedLevel = prefThinking != null
-        ? _normaliseLevel(prefThinking)
-        : _normaliseLevel(suggestedLevel);
-
-    // If no seed was found, fall back to first model in the list so that
-    // _selectedProvider/_selectedModelId are always populated when models exist.
-    if (seedProvider == null && models.isNotEmpty) {
-      seedProvider = models.first.provider;
-      seedModelId = models.first.id;
-    }
+    final prefs = _state.aiPrefs;
+    final seed =
+        listed(prefs['modelProvider'], prefs['modelId']) ??
+        listed(result.suggestedProvider, result.suggestedModelId) ??
+        models.first;
+    final seedLevel = _normaliseLevel(
+      prefs['thinkingLevel'] ?? result.suggestedThinkingLevel,
+    );
 
     setState(() {
-      _availableModels = models;
+      _loadedModels = result;
       _modelsLoading = false;
       _thinkingLevel = seedLevel;
-      _selectedProvider = seedProvider;
-      _selectedModelId = seedModelId;
+      _selectedProvider = seed.provider;
+      _selectedModelId = seed.id;
     });
   }
 

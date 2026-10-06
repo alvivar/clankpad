@@ -369,10 +369,9 @@ class _ThinkingPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    // If the current level isn't in the supported list, clamp to first.
-    final effectiveLevel = levels.contains(level) ? level : levels.first;
+    // EditorScreen normalises Pi and persisted levels, so level is in levels.
     return DropdownButton<String>(
-      value: effectiveLevel,
+      value: level,
       isDense: true,
       underline: const SizedBox.shrink(),
       style: TextStyle(fontSize: 12, color: colorScheme.onSurface),
@@ -380,7 +379,8 @@ class _ThinkingPicker extends StatelessWidget {
         return DropdownMenuItem<String>(value: l, child: Text(_labels[l] ?? l));
       }).toList(),
       onChanged: (v) {
-        onChanged(v ?? effectiveLevel);
+        if (v == null) return;
+        onChanged(v);
         onFocusBack?.call();
       },
     );

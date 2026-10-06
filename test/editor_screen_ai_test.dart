@@ -74,7 +74,52 @@ void main() {
     expect(pi.fetchCount, 2);
     expect(find.textContaining("Couldn't load Pi models"), findsNothing);
     expect(pi.requests, hasLength(1));
-    expect(pi.lastModelId, 'model');
+    expect(pi.lastModel, 'test/model');
+    await pi.finishAll(tester);
+  });
+
+  testWidgets('a listed persisted model wins and the list stays cached', (
+    tester,
+  ) async {
+    final state = EditorState()..activeTab.controller.text = 'original';
+    state.setAiPrefs({
+      'modelProvider': 'test',
+      'modelId': 'c',
+      'thinkingLevel': 'xhigh',
+    });
+    final pi = await _pumpEditor(tester, state: state, models: _threeModels);
+
+    await _submit(tester, 'first');
+    expect(pi.lastModel, 'test/c');
+    expect(pi.lastThinkingLevel, 'high');
+    await pi.finishAll(tester);
+    await tester.tap(find.text('Reject  (Ctrl+Backspace)'));
+    await tester.pump();
+
+    // Reopening keeps the in-session choice instead of reseeding or refetching.
+    await _pressCtrlK(tester);
+    tester
+        .widget<AiPromptPopup>(find.byType(AiPromptPopup))
+        .onModelChanged('test', 'a');
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    await _submit(tester, 'second');
+    expect(pi.lastModel, 'test/a');
+    expect(pi.fetchCount, 1);
+    await pi.finishAll(tester);
+  });
+
+  testWidgets('an unlisted persisted model yields to Pi suggestion', (
+    tester,
+  ) async {
+    final state = EditorState()..activeTab.controller.text = 'original';
+    state.setAiPrefs({'modelProvider': 'gone', 'modelId': 'c'});
+    final pi = await _pumpEditor(tester, state: state, models: _threeModels);
+
+    await _submit(tester, 'edit');
+
+    expect(pi.lastModel, 'test/b');
+    expect(pi.lastThinkingLevel, 'low');
     await pi.finishAll(tester);
   });
 
@@ -164,10 +209,12 @@ Future<_FakePi> _pumpEditor(
   WidgetTester tester, {
   EditorState? state,
   String text = 'original',
+  AiProviderModels? models,
 }) async {
   final editorState = state ?? EditorState();
   if (state == null) editorState.activeTab.controller.text = text;
   final pi = _FakePi();
+  if (models != null) pi.models = models;
   // Match a desktop window; the default test surface is narrower than the
   // diff's existing action-row layout.
   tester.view.physicalSize = const Size(1200, 800);
@@ -185,6 +232,17 @@ Future<_FakePi> _pumpEditor(
   await tester.pump();
   return pi;
 }
+
+const _threeModels = AiProviderModels(
+  models: [
+    AiModel(provider: 'test', id: 'a', name: 'A'),
+    AiModel(provider: 'test', id: 'b', name: 'B'),
+    AiModel(provider: 'test', id: 'c', name: 'C'),
+  ],
+  suggestedProvider: 'test',
+  suggestedModelId: 'b',
+  suggestedThinkingLevel: 'minimal',
+);
 
 Future<void> _pressCtrlK(WidgetTester tester) async {
   await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
@@ -225,15 +283,18 @@ class _FakePi extends PiProvider {
   var fetchCount = 0;
   // Thrown by the next fetches, in order.
   final fetchErrors = <Object>[];
-  String? lastModelId;
+  var models = const AiProviderModels(
+    models: [AiModel(provider: 'test', id: 'model', name: 'Model')],
+  );
+  // `provider/id` and thinking level of the last request.
+  String? lastModel;
+  String? lastThinkingLevel;
 
   @override
   Future<AiProviderModels> fetchModels() async {
     fetchCount++;
     if (fetchErrors.isNotEmpty) throw fetchErrors.removeAt(0);
-    return const AiProviderModels(
-      models: [AiModel(provider: 'test', id: 'model', name: 'Model')],
-    );
+    return models;
   }
 
   @override
@@ -246,7 +307,8 @@ class _FakePi extends PiProvider {
     String thinkingLevel = 'off',
     int? insertOffset,
   }) {
-    lastModelId = modelId;
+    lastModel = '$modelProvider/$modelId';
+    lastThinkingLevel = thinkingLevel;
     final request = StreamController<String>();
     requests.add(request);
     return request.stream;
