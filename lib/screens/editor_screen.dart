@@ -468,29 +468,29 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // ── Save / Save As ───────────────────────────────────────────────────────────
 
-  Future<bool> _saveTab(int index) async {
-    final tab = _state.tabs[index];
+  // Saves address the tab object, not its index: other tabs can close while
+  // the picker or write is pending.
+  Future<bool> _saveTab(EditorTab tab) async {
     if (tab.filePath != null && !tab.isDirty) return true;
     if (tab.filePath != null) {
-      return _writeFile(tab.filePath!, tab.controller.text, index);
+      return _writeFile(tab.filePath!, tab.controller.text, tab);
     }
-    return _saveTabAs(index);
+    return _saveTabAs(tab);
   }
 
-  Future<bool> _saveTabAs(int index) async {
-    final tab = _state.tabs[index];
+  Future<bool> _saveTabAs(EditorTab tab) async {
     final location = await getSaveLocation(
       suggestedName: _suggestedSaveName(tab),
     );
     if (location == null) return false;
-    return _writeFile(location.path, tab.controller.text, index);
+    return _writeFile(location.path, tab.controller.text, tab);
   }
 
-  Future<bool> _writeFile(String path, String content, int index) async {
+  Future<bool> _writeFile(String path, String content, EditorTab tab) async {
     try {
       await File(path).writeAsString(content);
       _state.onTabSaved(
-        index,
+        tab,
         savedContent: content,
         filePath: path,
         title: _fileNameFromPath(path),
@@ -897,7 +897,9 @@ class _EditorScreenState extends State<EditorScreen> {
           case _DirtyChoice.cancel:
             return;
           case _DirtyChoice.save:
-            final saved = await _saveTab(index);
+            // _closingTab blocks the only tab-removal path, so the index used
+            // below still identifies this tab after the save.
+            final saved = await _saveTab(tab);
             if (!saved) return; // save failed or cancelled → keep tab open
           case _DirtyChoice.dontSave:
             break;
@@ -1016,10 +1018,10 @@ class _EditorScreenState extends State<EditorScreen> {
             onInvoke: (_) => _aiActive ? null : _openFile(),
           ),
           SaveIntent: CallbackAction<SaveIntent>(
-            onInvoke: (_) => _saveTab(_state.activeTabIndex),
+            onInvoke: (_) => _saveTab(_state.activeTab),
           ),
           SaveAsIntent: CallbackAction<SaveAsIntent>(
-            onInvoke: (_) => _saveTabAs(_state.activeTabIndex),
+            onInvoke: (_) => _saveTabAs(_state.activeTab),
           ),
           OpenAiPromptIntent: CallbackAction<OpenAiPromptIntent>(
             onInvoke: (_) => _openAiPrompt(),

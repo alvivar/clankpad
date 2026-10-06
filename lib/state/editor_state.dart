@@ -175,13 +175,16 @@ class EditorState extends ChangeNotifier {
 
   // Called after a successful file write. Always updates savedContent.
   // filePath and title are only updated when non-null (Save As only).
+  //
+  // Takes the tab itself because tabs can close while the write is pending,
+  // shifting indices. A save whose tab has since closed has nothing to update.
   void onTabSaved(
-    int index, {
+    EditorTab tab, {
     required String savedContent,
     String? filePath,
     String? title,
   }) {
-    final tab = _tabs[index];
+    if (!_tabs.contains(tab)) return;
     tab.savedContent = savedContent;
     if (filePath != null) tab.filePath = filePath;
     if (title != null) tab.title = title;
