@@ -6,6 +6,7 @@ import 'package:clankpad/services/pi_provider.dart';
 import 'package:clankpad/state/editor_state.dart';
 import 'package:clankpad/widgets/ai_diff_view.dart';
 import 'package:clankpad/widgets/ai_prompt_popup.dart';
+import 'package:clankpad/widgets/editor_area.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -178,6 +179,59 @@ void main() {
     });
   }
 
+  // Accept rebuilds the document from the snapshot taken when the prompt
+  // opened, so any edit made while the prompt is open would be lost.
+  testWidgets('the editor cannot be edited while the prompt is open', (
+    tester,
+  ) async {
+    await _pumpEditor(tester, text: '');
+    // Earlier edits give Ctrl+Z something to revert.
+    for (final text in ['one\ntwo', 'one\ntwo\nsix']) {
+      await tester.enterText(_editorField, text);
+      await tester.pump(const Duration(seconds: 1));
+    }
+    const snapshot = 'one\ntwo\nsix';
+
+    await _pressCtrlK(tester);
+    await tester.tap(_editorField);
+    await tester.pump();
+    expect(find.byType(AiPromptPopup), findsOneWidget);
+    expect(_editorFocusNode(tester).hasFocus, isTrue);
+
+    tester.testTextInput.enterText('typed');
+    await tester.pump();
+    expect(_activeText(tester), snapshot, reason: 'typing');
+    // One of the two directions moves a line whichever line the caret is on.
+    await _sendShortcut(tester, LogicalKeyboardKey.arrowUp, alt: true);
+    expect(_activeText(tester), snapshot, reason: 'Alt+Up');
+    await _sendShortcut(tester, LogicalKeyboardKey.arrowDown, alt: true);
+    expect(_activeText(tester), snapshot, reason: 'Alt+Down');
+    await _sendShortcut(tester, LogicalKeyboardKey.keyJ, control: true);
+    expect(_activeText(tester), snapshot, reason: 'Ctrl+J');
+    await _sendShortcut(tester, LogicalKeyboardKey.keyZ, control: true);
+    expect(_activeText(tester), snapshot, reason: 'Ctrl+Z');
+    // Bound to Ctrl+T on macOS; transposes the characters around the caret,
+    // which the tap left after the text.
+    expect(_editorController(tester).selection.baseOffset, snapshot.length);
+    await _transposeCharacters(tester);
+    expect(_activeText(tester), snapshot, reason: 'transpose');
+    // Last: an unhandled Tab moves focus out of the read-only editor.
+    await _sendShortcut(tester, LogicalKeyboardKey.tab);
+    expect(_activeText(tester), snapshot, reason: 'Tab');
+
+    // Esc from the popup closes it and returns focus to an editable editor.
+    await tester.tap(_promptField);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(find.byType(AiPromptPopup), findsNothing);
+    expect(_editorFocusNode(tester).hasFocus, isTrue);
+    tester.testTextInput.enterText('typed');
+    await tester.pump();
+    expect(_activeText(tester), 'typed');
+    await _transposeCharacters(tester);
+    expect(_activeText(tester), 'typde');
+  });
+
   testWidgets('accept fails explicitly when the original tab is gone', (
     tester,
   ) async {
@@ -256,6 +310,37 @@ final _promptField = find.descendant(
   of: find.byType(AiPromptPopup),
   matching: find.byType(TextField),
 );
+
+final _editorField = find.descendant(
+  of: find.byType(EditorArea),
+  matching: find.byType(TextField),
+);
+
+FocusNode _editorFocusNode(WidgetTester tester) =>
+    tester.widget<TextField>(_editorField).focusNode!;
+
+TextEditingController _editorController(WidgetTester tester) =>
+    tester.widget<TextField>(_editorField).controller!;
+
+// Dispatches the intent from the focused node, as a shortcut would.
+Future<void> _transposeCharacters(WidgetTester tester) async {
+  Actions.invoke(primaryFocus!.context!, const TransposeCharactersIntent());
+  await tester.pump();
+}
+
+Future<void> _sendShortcut(
+  WidgetTester tester,
+  LogicalKeyboardKey key, {
+  bool alt = false,
+  bool control = false,
+}) async {
+  if (alt) await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+  if (control) await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+  await tester.sendKeyEvent(key);
+  if (control) await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+  if (alt) await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+  await tester.pump();
+}
 
 Future<void> _submit(WidgetTester tester, String prompt) async {
   await _pressCtrlK(tester);

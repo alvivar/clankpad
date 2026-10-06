@@ -42,7 +42,7 @@ class _EditorScreenState extends State<EditorScreen> {
   bool _aiPromptVisible = false;
 
   // True while the AI request is in-flight AND while the diff view is shown.
-  // Keeps the editor readOnly so the snapshot remains valid.
+  // Drives the loading UI; the editor itself is read-only whenever _aiActive.
   bool _editorReadOnly = false;
 
   // Snapshot captured when the Ctrl+K popup opens.
@@ -131,8 +131,10 @@ class _EditorScreenState extends State<EditorScreen> {
   EditorState get _state => widget.editorState;
 
   /// True during every AI phase: prompt open, streaming, and diff visible.
-  /// Used to guard structural actions (new/close/open/switch) that would
-  /// invalidate the snapshot or apply the diff to the wrong tab.
+  /// The editor is read-only and structural actions (new/close/open/switch)
+  /// are blocked, because accepting rebuilds the document from the snapshot
+  /// taken when the prompt opened: any later edit would be silently lost, and
+  /// a structural change could apply the diff to the wrong tab.
   bool get _aiActive => _aiPromptVisible || _editorReadOnly;
 
   // ── Paragraph helper ─────────────────────────────────────────────────────────
@@ -175,7 +177,7 @@ class _EditorScreenState extends State<EditorScreen> {
   /// `moveLines` for line-ending and selection rules. No-op when the editor is
   /// not focused, is read-only, or is already at the boundary.
   void _moveLines(int direction) {
-    if (!_editorFocusNode.hasFocus || _editorReadOnly) return;
+    if (!_editorFocusNode.hasFocus || _aiActive) return;
     final controller = _state.activeTab.controller;
     final moved = moveLines(controller.value, direction);
     if (moved != null) controller.value = moved;
@@ -184,7 +186,7 @@ class _EditorScreenState extends State<EditorScreen> {
   /// Joins hard-wrapped lines within the selection, or the whole document when
   /// there is no selection. See `joinLines` for the paragraph rules.
   void _joinLines() {
-    if (!_editorFocusNode.hasFocus || _editorReadOnly) return;
+    if (!_editorFocusNode.hasFocus || _aiActive) return;
     final controller = _state.activeTab.controller;
     final text = controller.text;
     final selection = controller.selection;
@@ -1150,7 +1152,7 @@ class _EditorScreenState extends State<EditorScreen> {
                   children: [
                     EditorArea(
                       tab: _state.activeTab,
-                      readOnly: _editorReadOnly,
+                      readOnly: _aiActive,
                       focusNode: _editorFocusNode,
                     ),
 

@@ -7,6 +7,17 @@ class EditorArea extends StatelessWidget {
   static const _tabSize = 4;
   static const _indent = '    ';
 
+  // A read-only TextField still applies undo/redo (Flutter's UndoHistory
+  // ignores readOnly) and character transposition (macOS Ctrl+T), so they are
+  // overridden with no-ops while read-only.
+  static final _readOnlyActions = <Type, Action<Intent>>{
+    UndoTextIntent: CallbackAction<UndoTextIntent>(onInvoke: (_) => null),
+    RedoTextIntent: CallbackAction<RedoTextIntent>(onInvoke: (_) => null),
+    TransposeCharactersIntent: CallbackAction<TransposeCharactersIntent>(
+      onInvoke: (_) => null,
+    ),
+  };
+
   final EditorTab tab;
   final bool readOnly;
   // Persistent FocusNode supplied by EditorScreen so that focus can be
@@ -261,36 +272,39 @@ class EditorArea extends StatelessWidget {
       color: colorScheme.surface,
       child: Focus(
         onKeyEvent: (_, event) => _handleKeyEvent(event),
-        child: TextField(
-          // No ValueKey — the same TextField element is reused across tab
-          // switches. Only controller and scrollController change, so focus
-          // never leaves the element during a tab switch.
-          controller: tab.controller,
-          scrollController: tab.scrollController,
-          focusNode: focusNode,
-          // autofocus fires once when the TextField is first inserted (app
-          // startup). After that, focus is managed explicitly via focusNode.
-          autofocus: true,
-          readOnly: readOnly,
+        child: Actions(
+          actions: readOnly ? _readOnlyActions : const {},
+          child: TextField(
+            // No ValueKey — the same TextField element is reused across tab
+            // switches. Only controller and scrollController change, so focus
+            // never leaves the element during a tab switch.
+            controller: tab.controller,
+            scrollController: tab.scrollController,
+            focusNode: focusNode,
+            // autofocus fires once when the TextField is first inserted (app
+            // startup). After that, focus is managed explicitly via focusNode.
+            autofocus: true,
+            readOnly: readOnly,
 
-          // Word wrap on, vertical scroll only (Phase 1 default).
-          maxLines: null,
-          expands: true,
-          textAlignVertical: TextAlignVertical.top,
+            // Word wrap on, vertical scroll only (Phase 1 default).
+            maxLines: null,
+            expands: true,
+            textAlignVertical: TextAlignVertical.top,
 
-          style: const TextStyle(
-            fontFamily: 'Consolas',
-            fontSize: 14,
-            height: 1.6,
+            style: const TextStyle(
+              fontFamily: 'Consolas',
+              fontSize: 14,
+              height: 1.6,
+            ),
+            decoration: const InputDecoration(
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.all(16),
+              // Suppress the default focus ring / underline on desktop.
+              focusedBorder: InputBorder.none,
+              enabledBorder: InputBorder.none,
+            ),
+            cursorWidth: 1.5,
           ),
-          decoration: const InputDecoration(
-            border: InputBorder.none,
-            contentPadding: EdgeInsets.all(16),
-            // Suppress the default focus ring / underline on desktop.
-            focusedBorder: InputBorder.none,
-            enabledBorder: InputBorder.none,
-          ),
-          cursorWidth: 1.5,
         ),
       ),
     );
