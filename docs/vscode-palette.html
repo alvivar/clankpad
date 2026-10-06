@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Clankpad — VS Code palette proposal</title>
+<style>
+  /* ── Palettes (values taken from VS Code's built-in themes) ─────────────── */
+  .dm { /* Dark Modern — VS Code default dark since 1.78 */
+    --editor:#1F1F1F; --fg:#CCCCCC; --fg-strong:#FFFFFF; --muted:#9D9D9D; --placeholder:#989898;
+    --tabbar:#181818; --tab-inactive:#181818; --tab-active:#1F1F1F; --tab-border:#2B2B2B;
+    --tab-indicator:#0078D4; --indicator-side:top;
+    --widget:#202020; --widget-border:#454545; --divider:#2B2B2B; --input:#313131; --input-border:#3C3C3C;
+    --accent:#0078D4; --button-fg:#FFFFFF; --focus:#0078D4; --hover:#2A2D2E;
+    --selection:#264F78; --target:#3A3D41; --match:#515C6A; --match-other:#EA5C0055;
+    --ins-line:#9BB95526; --ins-word:#9CCC2C40; --ins-mark:#81B88B;
+    --del-line:#FF00001F; --del-word:#FF000040; --del-mark:#F85149;
+    --error:#F14C4C; --banner:#252526; --banner-fg:#CCCCCC;
+    --chip-run:#0078D4; --chip-done:#73C991; --dirty:#FFFFFF;
+    --page:#0f0f10; --page-fg:#d6d6d6; --shadow:0 4px 16px #0009;
+  }
+  .dp { /* Dark+ — the classic VS Code dark (pre-2023 default) */
+    --editor:#1E1E1E; --fg:#D4D4D4; --fg-strong:#FFFFFF; --muted:#969696; --placeholder:#8C8C8C;
+    --tabbar:#252526; --tab-inactive:#2D2D2D; --tab-active:#1E1E1E; --tab-border:#252526;
+    --tab-indicator:transparent; --indicator-side:top;
+    --widget:#252526; --widget-border:#454545; --divider:#3C3C3C; --input:#3C3C3C; --input-border:#3C3C3C;
+    --accent:#0E639C; --button-fg:#FFFFFF; --focus:#007FD4; --hover:#2A2D2E;
+    --selection:#264F78; --target:#3A3D41; --match:#515C6A; --match-other:#EA5C0055;
+    --ins-line:#9BB95526; --ins-word:#9CCC2C40; --ins-mark:#81B88B;
+    --del-line:#FF00001F; --del-word:#FF000040; --del-mark:#F85149;
+    --error:#F48771; --banner:#252526; --banner-fg:#CCCCCC;
+    --chip-run:#3794FF; --chip-done:#89D185; --dirty:#FFFFFF;
+    --page:#111; --page-fg:#d6d6d6; --shadow:0 4px 16px #0009;
+  }
+  .lm { /* Light Modern — VS Code default light since 1.78 */
+    --editor:#FFFFFF; --fg:#3B3B3B; --fg-strong:#1F1F1F; --muted:#868686; --placeholder:#767676;
+    --tabbar:#F8F8F8; --tab-inactive:#F8F8F8; --tab-active:#FFFFFF; --tab-border:#E5E5E5;
+    --tab-indicator:#005FB8; --indicator-side:top;
+    --widget:#F8F8F8; --widget-border:#C8C8C8; --divider:#E5E5E5; --input:#FFFFFF; --input-border:#CECECE;
+    --accent:#005FB8; --button-fg:#FFFFFF; --focus:#005FB8; --hover:#F2F2F2;
+    --selection:#ADD6FF; --target:#E5EBF1; --match:#A8AC94; --match-other:#EA5C0055;
+    --ins-line:#9BB95533; --ins-word:#9CCC2C66; --ins-mark:#587C0C;
+    --del-line:#FF00001A; --del-word:#FF000033; --del-mark:#AD0707;
+    --error:#E51400; --banner:#F8F8F8; --banner-fg:#3B3B3B;
+    --chip-run:#005FB8; --chip-done:#388A34; --dirty:#3B3B3B;
+    --page:#e9e9ea; --page-fg:#222; --shadow:0 4px 16px #0003;
+  }
+
+  /* ── Page ─────────────────────────────────────────────────────────────── */
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 "Segoe UI", system-ui, sans-serif; background:#0b0b0c; color:#ddd; }
+  header.page { max-width:1200px; margin:0 auto; padding:32px 24px 8px; }
+  header.page h1 { margin:0 0 6px; font-weight:600; font-size:24px; }
+  header.page p { margin:4px 0; color:#aaa; max-width:900px; }
+  nav { display:flex; gap:8px; flex-wrap:wrap; margin:14px 0 0; }
+  nav a { color:#ddd; text-decoration:none; border:1px solid #333; border-radius:4px; padding:4px 10px; font-size:13px; }
+  nav a:hover { background:#222; }
+  section.theme { background:var(--page); color:var(--page-fg); padding:28px 24px 36px; border-top:1px solid #0004; }
+  section.theme > .inner { max-width:1200px; margin:0 auto; }
+  section.theme h2 { margin:0 0 4px; font-size:20px; font-weight:600; }
+  section.theme .tag { font-size:12px; padding:1px 8px; border-radius:10px; background:var(--accent); color:#fff; margin-left:8px; vertical-align:2px; }
+  section.theme .lead { margin:0 0 18px; opacity:.8; max-width:900px; }
+  .frames { display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:18px; }
+  figure { margin:0; }
+  figcaption { font-size:12px; opacity:.7; margin:6px 2px 0; }
+
+  /* ── App window mockup ────────────────────────────────────────────────── */
+  .win { height:380px; display:flex; flex-direction:column; background:var(--editor); color:var(--fg);
+         border:1px solid var(--tab-border); border-radius:6px; overflow:hidden; box-shadow:var(--shadow); font-size:13px; }
+  .tabs { height:36px; flex:none; display:flex; background:var(--tabbar); border-bottom:1px solid var(--tab-border); }
+  .tab { display:flex; align-items:center; gap:6px; padding:0 4px 0 12px; height:36px; background:var(--tab-inactive);
+         color:var(--muted); border-right:1px solid var(--tab-border); border-top:2px solid transparent; white-space:nowrap; }
+  .tab.active { background:var(--tab-active); color:var(--fg-strong); border-top-color:var(--tab-indicator); margin-bottom:-1px; }
+  .tab .x { width:20px; height:20px; display:grid; place-items:center; color:var(--muted); border-radius:4px; font-size:12px; }
+  .tab .x:hover { background:var(--hover); }
+  .tab .dot { font-size:9px; color:var(--dirty); }
+  .tabs .grow { flex:1; }
+  .tabs .plus { width:36px; display:grid; place-items:center; color:var(--muted); border-left:1px solid var(--tab-border); font-size:18px; }
+
+  .banner { display:flex; align-items:center; padding:4px 8px 4px 12px; background:var(--banner); color:var(--banner-fg);
+            border-left:3px solid var(--error); border-bottom:1px solid var(--divider); }
+  .banner .grow { flex:1; }
+
+  .find { display:flex; align-items:center; gap:6px; padding:4px 8px; background:var(--widget); border-bottom:1px solid var(--divider); }
+  .find .field { flex:1; background:var(--input); border:1px solid var(--focus); border-radius:2px; padding:3px 6px; color:var(--fg); }
+  .find .count { font-size:12px; color:var(--muted); padding:0 6px; }
+  .find .icon { color:var(--fg); width:22px; text-align:center; opacity:.85; }
+
+  .editor { position:relative; flex:1; padding:16px; font:14px/1.6 Consolas, monospace; white-space:pre-wrap; overflow:hidden; }
+  .caret { display:inline-block; width:1.5px; height:1.15em; background:var(--fg); vertical-align:-2px; }
+  .sel { background:var(--selection); }
+  .target { background:var(--target); }
+  .m { background:var(--match-other); }
+  .m.cur { background:var(--match); }
+
+  .progress { height:2px; background:var(--accent); }
+  .cancelrow { display:flex; justify-content:flex-end; padding:2px 8px; background:var(--widget); font-size:12px; color:var(--muted); }
+
+  .popup { position:absolute; top:12px; left:50%; transform:translateX(-50%); width:min(92%, 560px);
+           background:var(--widget); border:1px solid var(--widget-border); border-radius:6px; box-shadow:var(--shadow);
+           padding:10px 14px 0; font:14px/1.4 "Segoe UI", sans-serif; white-space:normal; }
+  .popup .prompt { color:var(--fg); padding:2px 0 8px; }
+  .popup .hint { color:var(--placeholder); font-size:13px; }
+  .popup .foot { display:flex; gap:14px; height:32px; align-items:center; border-top:1px solid var(--divider); font-size:12px; color:var(--fg); }
+  .popup .dd::after { content:" ▾"; color:var(--muted); }
+
+  .diff { position:absolute; inset:10px; display:flex; flex-direction:column; background:var(--widget);
+          border:1px solid var(--widget-border); border-radius:6px; box-shadow:var(--shadow); font:13px "Segoe UI", sans-serif; white-space:normal; }
+  .diff .head { display:flex; align-items:center; padding:10px 14px 8px; font-weight:600; color:var(--fg-strong); border-bottom:1px solid var(--divider); }
+  .diff .head .grow { flex:1; }
+  .chip { font-size:11px; font-weight:600; padding:3px 8px; border-radius:999px; }
+  .chip.run { color:var(--chip-run); background:color-mix(in srgb, var(--chip-run) 18%, transparent); }
+  .chip.done { color:var(--chip-done); background:color-mix(in srgb, var(--chip-done) 18%, transparent); }
+  .diff .body { flex:1; padding:6px 0; font:13px/1.5 Consolas, monospace; overflow:hidden; }
+  .row { display:flex; padding:0 14px 0 8px; }
+  .row .mk { width:18px; flex:none; color:var(--muted); }
+  .row.ins { background:var(--ins-line); } .row.ins .mk { color:var(--ins-mark); }
+  .row.del { background:var(--del-line); } .row.del .mk { color:var(--del-mark); }
+  .w-ins { background:var(--ins-word); } .w-del { background:var(--del-word); }
+  .diff .actions { display:flex; justify-content:flex-end; gap:8px; padding:8px 12px; border-top:1px solid var(--divider); }
+  .btn { padding:4px 12px; border-radius:2px; font-size:13px; }
+  .btn.text { color:var(--fg); background:transparent; border:1px solid var(--input-border); }
+  .btn.fill { color:var(--button-fg); background:var(--accent); }
+
+  /* ── Swatches ─────────────────────────────────────────────────────────── */
+  details { margin-top:18px; }
+  summary { cursor:pointer; opacity:.85; }
+  table { border-collapse:collapse; margin-top:10px; font-size:12.5px; }
+  td, th { padding:4px 10px; text-align:left; border-bottom:1px solid color-mix(in srgb, var(--page-fg) 12%, transparent); }
+  th { font-weight:600; opacity:.75; }
+  .sw { display:inline-block; width:28px; height:16px; border-radius:3px; vertical-align:-3px;
+        border:1px solid color-mix(in srgb, var(--page-fg) 25%, transparent);
+        background-image:linear-gradient(var(--c), var(--c)), repeating-conic-gradient(#999 0 25%, #ddd 0 50%);
+        background-size:auto, 8px 8px; }
+  code { font:12px Consolas, monospace; }
+
+  footer.page { max-width:1200px; margin:0 auto; padding:24px; color:#aaa; font-size:13px; }
+  footer.page li { margin:4px 0; }
+</style>
+</head>
+<body>
+
+<header class="page">
+  <h1>Clankpad — VS Code palette proposal</h1>
+  <p>Three palettes copied from VS Code's built-in themes. Clankpad follows the Windows light/dark setting, so a complete proposal is one dark palette plus Light Modern.</p>
+  <p><b>Status:</b> A (Dark Modern) is the dark theme since commit <code>5185c21</code>. B and C are not implemented; light mode still uses the original palette. The mockups show the proposal, so a few details differ from what shipped (see <a href="#notes">notes</a>).</p>
+  <nav>
+    <a href="#dark-modern">A · Dark Modern</a>
+    <a href="#dark-plus">B · Dark+ (classic)</a>
+    <a href="#light-modern">C · Light Modern</a>
+    <a href="#notes">Shipped vs. proposal</a>
+  </nav>
+</header>
+
+<!-- Each theme section repeats the same three mockups; only the CSS class changes. -->
+<template id="frames">
+  <div class="frames">
+    <figure>
+      <div class="win">
+        <div class="tabs">
+          <div class="tab active"><span class="dot">●</span>notes.txt<span class="x">✕</span></div>
+          <div class="tab">todo.txt<span class="x">✕</span></div>
+          <div class="tab">Untitled 3<span class="x">✕</span></div>
+          <div class="grow"></div><div class="plus">+</div>
+        </div>
+        <div class="find">
+          <div class="field">palette</div>
+          <span class="count">2 of 3</span>
+          <span class="icon">↑</span><span class="icon">↓</span><span class="icon">✕</span>
+        </div>
+<div class="editor">Clankpad notes
+
+A calm <span class="m">palette</span> makes long writing sessions easier.
+The current <span class="m cur">palette</span> should feel like VS Code:
+neutral greys, one blue accent, <span class="sel">quiet selection</span><span class="caret"></span>.
+
+TODO: compare the light <span class="m">palette</span> in daylight.</div>
+      </div>
+      <figcaption>Tabs, dirty dot, find bar, matches (current/others), and selection.</figcaption>
+    </figure>
+
+    <figure>
+      <div class="win">
+        <div class="tabs">
+          <div class="tab active">notes.txt<span class="x">✕</span></div>
+          <div class="tab">todo.txt<span class="x">✕</span></div>
+          <div class="grow"></div><div class="plus">+</div>
+        </div>
+        <div class="banner"><span class="grow">Couldn't reach the AI service. Check your connection and try again.</span>✕</div>
+<div class="editor">
+
+<span class="target">A calm palette makes long writing sessions easier.
+The current palette should feel like VS Code:
+neutral greys, one blue accent, quiet selection.</span>
+
+TODO: compare the light palette in daylight.<div class="popup">
+  <div class="prompt">Make this paragraph shorter<span class="caret"></span></div>
+  <div class="foot"><span class="dd">claude-sonnet-4-5</span><span class="dd">Medium</span></div>
+</div></div>
+      </div>
+      <figcaption>Ctrl+K prompt, highlighted edit target, and the error banner.</figcaption>
+    </figure>
+
+    <figure>
+      <div class="win">
+        <div class="tabs">
+          <div class="tab active">notes.txt<span class="x">✕</span></div>
+          <div class="tab">todo.txt<span class="x">✕</span></div>
+          <div class="grow"></div><div class="plus">+</div>
+        </div>
+        <div class="editor"><div class="diff">
+          <div class="head"><span class="grow">Proposed AI edit</span><span class="chip done">Complete</span></div>
+          <div class="body">
+            <div class="row del"><span class="mk">-</span><span>A <span class="w-del">calm</span> palette makes long writing sessions easier.</span></div>
+            <div class="row ins"><span class="mk">+</span><span>A <span class="w-ins">quiet</span> palette makes long writing sessions easier.</span></div>
+            <div class="row"><span class="mk"> </span><span>The current palette should feel like VS Code:</span></div>
+            <div class="row del"><span class="mk">-</span><span>neutral greys, one blue accent, quiet selection.</span></div>
+            <div class="row ins"><span class="mk">+</span><span>neutral greys and one blue accent.</span></div>
+          </div>
+          <div class="actions">
+            <span class="btn text">Reject (Ctrl+Backspace)</span>
+            <span class="btn fill">Accept (Ctrl+Enter)</span>
+          </div>
+        </div></div>
+      </div>
+      <figcaption>Diff view: line and word changes, status chip, and buttons. While generating, the chip uses the accent color.</figcaption>
+    </figure>
+
+    <figure>
+      <div class="win" style="height:auto">
+        <div class="tabs">
+          <div class="tab active">notes.txt<span class="x">✕</span></div>
+          <div class="grow"></div><div class="plus">+</div>
+        </div>
+        <div class="progress"></div>
+        <div class="cancelrow">Cancel  (Esc)</div>
+<div class="editor" style="height:90px">Waiting for Pi… <span class="chip run">Generating…</span></div>
+      </div>
+      <figcaption>Progress bar and Cancel row before the diff opens.</figcaption>
+    </figure>
+  </div>
+</template>
+
+<section class="theme dm" id="dark-modern"><div class="inner">
+  <h2>A · Dark Modern<span class="tag">shipped</span></h2>
+  <p class="lead">VS Code's current default dark theme. Neutral, nearly black greys, a blue top border on the active tab, and blue accents only where they mark focus or the primary action.</p>
+  <div class="slot"></div>
+</div></section>
+
+<section class="theme dp" id="dark-plus"><div class="inner">
+  <h2>B · Dark+ (classic)</h2>
+  <p class="lead">The pre-2023 default dark theme. Inactive tabs are lighter than the tab bar, active tabs have no colored indicator, and the blue is slightly darker.</p>
+  <div class="slot"></div>
+</div></section>
+
+<section class="theme lm" id="light-modern"><div class="inner">
+  <h2>C · Light Modern<span class="tag">pairs with A</span></h2>
+  <p class="lead">VS Code's default light theme, shown here as a light-mode proposal that is not yet implemented.</p>
+  <div class="slot"></div>
+</div></section>
+
+<footer class="page" id="notes">
+  <h3>Shipped vs. proposal (A · Dark Modern)</h3>
+  <ul>
+    <li><b>Where:</b> an explicit dark <code>ColorScheme</code> plus <code>TextSelectionThemeData</code> in <code>lib/main.dart</code>. Dark find-match colors live in <code>lib/models/editor_tab.dart</code> because their roles are shared with other widgets.</li>
+    <li><b>Surfaces:</b> the Ctrl+K popup and diff panel use <code>#252526</code>, the find bar uses <code>#202020</code>, and dropdown menus use the editor background <code>#1F1F1F</code>.</li>
+    <li><b>Error banner:</b> <code>#252526</code> / <code>#CCCCCC</code> in both modes, with the terracotta <code>#D99B79</code> accent instead of VS Code red.</li>
+    <li><b>Diff:</b> the existing green and the terracotta deleted-word highlight were kept; the mockup shows VS Code's green and red.</li>
+    <li><b>Layout unchanged:</b> the active-tab indicator stays on the bottom edge, and the dirty dot keeps the accent color.</li>
+  </ul>
+</footer>
+
+<script>
+  // Fill every theme section with the shared mockups and its swatch table.
+  const roles = [
+    ['--editor','Editor background','surface'],
+    ['--fg','Editor text','onSurface'],
+    ['--muted','Secondary text / icons','onSurfaceVariant'],
+    ['--tabbar','Tab bar','surfaceContainerHighest (tab bar)'],
+    ['--tab-inactive','Inactive tab','tab item'],
+    ['--tab-border','Tab and window borders','outlineVariant'],
+    ['--tab-indicator','Active tab indicator','primary (tab border)'],
+    ['--widget','Find bar / Ctrl+K / diff panel','surfaceContainerLow / High'],
+    ['--widget-border','Floating panel border','outline'],
+    ['--input','Input background','find field'],
+    ['--accent','Accent / primary button / progress','primary'],
+    ['--selection','Selection','TextSelectionTheme'],
+    ['--target','Ctrl+K edit target','tertiaryContainer (editor_tab.dart)'],
+    ['--match','Current find match','primary @ .35 (editor_tab.dart)'],
+    ['--match-other','Other find matches','primaryContainer (editor_tab.dart)'],
+    ['--ins-line','Inserted line','diff (hardcoded)'],
+    ['--ins-word','Inserted word','diff (hardcoded)'],
+    ['--del-line','Deleted line','errorContainer @ .20'],
+    ['--del-word','Deleted word','diff (hardcoded terracotta)'],
+    ['--error','Error accent','banner (hardcoded)'],
+  ];
+  const tpl = document.getElementById('frames');
+  for (const section of document.querySelectorAll('section.theme')) {
+    const slot = section.querySelector('.slot');
+    slot.replaceWith(tpl.content.cloneNode(true));
+    const css = getComputedStyle(section);
+    const rows = roles.map(([v, name, where]) => {
+      const c = css.getPropertyValue(v).trim();
+      return `<tr><td><span class="sw" style="--c:${c}"></span></td><td>${name}</td><td><code>${c}</code></td><td><code>${where}</code></td></tr>`;
+    }).join('');
+    section.querySelector('.inner').insertAdjacentHTML('beforeend',
+      `<details><summary>Palette and the Clankpad role it was mapped from</summary>
+       <table><tr><th></th><th>Role</th><th>Hex</th><th>Original Clankpad role</th></tr>${rows}</table></details>`);
+  }
+</script>
+</body>
+</html>
