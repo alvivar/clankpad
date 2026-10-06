@@ -1011,9 +1011,9 @@ class _EditorScreenState extends State<EditorScreen> {
             MoveLineUpIntent(),
         SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
             MoveLineDownIntent(),
-        // Escape cancels the in-flight AI request before the diff opens.
-        // Once the diff is visible, this action is gated off by _diffVisible.
-        SingleActivator(LogicalKeyboardKey.escape): CancelAiIntent(),
+        // Escape that reaches the screen (the prompt and Find field handle
+        // their own): see the EscapeIntent action below.
+        SingleActivator(LogicalKeyboardKey.escape): EscapeIntent(),
       },
       child: Actions(
         actions: {
@@ -1048,11 +1048,19 @@ class _EditorScreenState extends State<EditorScreen> {
           MoveLineDownIntent: CallbackAction<MoveLineDownIntent>(
             onInvoke: (_) => _moveLines(1),
           ),
-          CancelAiIntent: CallbackAction<CancelAiIntent>(
+          EscapeIntent: CallbackAction<EscapeIntent>(
             onInvoke: (_) {
-              if (_editorReadOnly && !_aiPromptVisible && !_diffVisible) {
+              // The diff is only closed by accept or reject.
+              if (_diffVisible) return null;
+              // Loading: cancel the request. The prompt cannot be open then.
+              if (_editorReadOnly) {
                 _cancelAiRequest();
+                return null;
               }
+              // With focus in the editor, close whichever of the prompt and
+              // the Find bar is open; Find can stay open under the prompt.
+              if (_aiPromptVisible) _dismissAiPrompt();
+              if (_searchVisible) _closeSearch();
               return null;
             },
           ),

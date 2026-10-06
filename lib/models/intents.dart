@@ -33,9 +33,11 @@ class RejectDiffIntent extends Intent {
   const RejectDiffIntent();
 }
 
-/// Fired by Escape while the AI request is in-flight (before the diff opens).
-class CancelAiIntent extends Intent {
-  const CancelAiIntent();
+/// Fired by Escape when no focused widget handles it: cancels a loading AI
+/// request, or else closes the AI prompt and the Find bar. Does nothing while
+/// the diff is visible.
+class EscapeIntent extends Intent {
+  const EscapeIntent();
 }
 
 class OpenSearchIntent extends Intent {

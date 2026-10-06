@@ -7,6 +7,7 @@ import 'package:clankpad/state/editor_state.dart';
 import 'package:clankpad/widgets/ai_diff_view.dart';
 import 'package:clankpad/widgets/ai_prompt_popup.dart';
 import 'package:clankpad/widgets/editor_area.dart';
+import 'package:clankpad/widgets/find_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -230,6 +231,72 @@ void main() {
     expect(_activeText(tester), 'typed');
     await _transposeCharacters(tester);
     expect(_activeText(tester), 'typde');
+  });
+
+  testWidgets('Esc in the editor closes the prompt and the Find bar', (
+    tester,
+  ) async {
+    await _pumpEditor(tester);
+    Future<void> escFromEditor() async {
+      await tester.tap(_editorField);
+      await tester.pump();
+      expect(_editorFocusNode(tester).hasFocus, isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+    }
+
+    await _pressCtrlK(tester);
+    await escFromEditor();
+    expect(find.byType(AiPromptPopup), findsNothing);
+    expect(_editorFocusNode(tester).hasFocus, isTrue);
+
+    await _sendShortcut(tester, LogicalKeyboardKey.keyF, control: true);
+    expect(find.byType(FindBar), findsOneWidget);
+    await escFromEditor();
+    expect(find.byType(FindBar), findsNothing);
+    expect(_editorFocusNode(tester).hasFocus, isTrue);
+
+    // Find stays open under a prompt opened after it; one Esc closes both.
+    await _sendShortcut(tester, LogicalKeyboardKey.keyF, control: true);
+    await _pressCtrlK(tester);
+    expect(find.byType(FindBar), findsOneWidget);
+    expect(find.byType(AiPromptPopup), findsOneWidget);
+    await escFromEditor();
+    expect(find.byType(FindBar), findsNothing);
+    expect(find.byType(AiPromptPopup), findsNothing);
+    expect(_editorFocusNode(tester).hasFocus, isTrue);
+  });
+
+  testWidgets('Esc in the editor cancels loading but leaves the diff', (
+    tester,
+  ) async {
+    final pi = await _pumpEditor(tester);
+    await _submit(tester, 'first');
+    await tester.tap(_editorField);
+    await tester.pump();
+    expect(_editorFocusNode(tester).hasFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(pi.abortCount, 1);
+    expect(find.text('Cancel  (Esc)'), findsNothing);
+    expect(_editorFocusNode(tester).hasFocus, isTrue);
+    await pi.finish(tester, 0);
+
+    await _submit(tester, 'second');
+    pi.requests[1].add('proposal');
+    await tester.pump();
+    await pi.finish(tester, 1);
+    expect(find.byType(AiDiffView), findsOneWidget);
+    // Click into the editor below the diff card.
+    await tester.tapAt(
+      tester.getBottomLeft(_editorField) + const Offset(8, -8),
+    );
+    await tester.pump();
+    expect(_editorFocusNode(tester).hasFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(find.byType(AiDiffView), findsOneWidget);
+    expect(pi.abortCount, 1);
   });
 
   testWidgets('accept fails explicitly when the original tab is gone', (
