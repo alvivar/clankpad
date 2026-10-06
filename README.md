@@ -77,11 +77,13 @@ On Windows and macOS the native runner opens the window centered at about 80% wi
 | `Ctrl+N` or click **`+`**                    | Open a new empty tab |
 | Click a tab                                  | Switch to that tab   |
 | `Ctrl+W`, click **`×`**, or middle-click tab | Close a tab          |
+| Drag a tab with the mouse                    | Reorder tabs         |
 
 - File-backed tabs use the file name as their title.
 - New unsaved tabs are named `Untitled N`; the counter increments and is never reused.
 - A dot `●` marks tabs with unsaved changes.
 - The tab bar scrolls horizontally when tabs exceed the available width.
+- Dragging a tab does not switch to it. The tab order is restored with the session. Tabs cannot be reordered while an AI prompt, request, or diff is active.
 - Closing the last tab exits the app if that tab is an empty clean untitled tab; otherwise dirty-close rules still apply.
 
 Closing a dirty tab prompts:
@@ -114,11 +116,11 @@ The find bar appears between the tab bar and editor.
 - Navigation wraps around.
 - If the editor has a non-collapsed single-line selection when Find opens, that text pre-fills the query.
 
-| Key                        | Action         |
-| -------------------------- | -------------- |
-| `Enter` / `F3`             | Next match     |
-| `Shift+Enter` / `Shift+F3` | Previous match |
-| `Escape`                   | Close find bar |
+| Key                        | Action                                                                        |
+| -------------------------- | ----------------------------------------------------------------------------- |
+| `Enter` / `F3`             | Next match                                                                    |
+| `Shift+Enter` / `Shift+F3` | Previous match                                                                |
+| `Escape`                   | Close find bar (also from the editor, unless an AI request or diff is active) |
 
 ---
 
@@ -177,16 +179,18 @@ When `Ctrl+K` opens, Clankpad snapshots the active tab:
 
 The edit target is highlighted until the prompt is dismissed or the diff is accepted/rejected.
 
+While the prompt is open, the editor is read-only; you can still click, select, and copy text.
+
 ### Prompt popup keys
 
-| Key           | Action                                                           |
-| ------------- | ---------------------------------------------------------------- |
-| `Enter`       | Submit prompt                                                    |
-| `Shift+Enter` | Insert newline in prompt                                         |
-| `Escape`      | Dismiss popup                                                    |
-| `↑` / `↓`     | Browse prompt history when cursor is on first/last line          |
-| `Ctrl+P`      | Cycle model                                                      |
-| `Shift+Tab`   | Cycle thinking level when the effective model supports reasoning |
+| Key           | Action                                                                                                   |
+| ------------- | -------------------------------------------------------------------------------------------------------- |
+| `Enter`       | Submit prompt                                                                                            |
+| `Shift+Enter` | Insert newline in prompt                                                                                 |
+| `Escape`      | Dismiss popup; from the editor, this also closes an open find bar                                        |
+| `↑` / `↓`     | Browse prompt history when the caret is at the very start / end (no selection); otherwise move the caret |
+| `Ctrl+P`      | Cycle model                                                                                              |
+| `Shift+Tab`   | Cycle thinking level when the effective model supports reasoning                                         |
 
 When available, the popup footer provides mouse-selectable model and thinking-level dropdowns as alternatives to the keyboard shortcuts. The thinking selector appears only when the effective model supports reasoning.
 
@@ -202,7 +206,7 @@ Prompt history is in-memory only and capped at 50 entries.
 
 After submit:
 
-1. The editor becomes read-only.
+1. The editor stays read-only, as it is while the prompt is open.
 2. A thin progress indicator appears below the tab bar.
 3. The AI response streams into a unified line-level diff card with `+` / `-` markers and red/green highlighting. Single-line replacements also emphasize changed word, whitespace, and punctuation tokens; larger change blocks remain whole-row diffs.
 4. The editor remains locked until you accept or reject.
@@ -222,19 +226,19 @@ If an AI provider fails, Clankpad shows a dismissible error banner and unlocks t
 
 ### App-level
 
-| Shortcut       | Action                        |
-| -------------- | ----------------------------- |
-| `Ctrl+N`       | New tab                       |
-| `Ctrl+W`       | Close active tab              |
-| `Ctrl+O`       | Open file                     |
-| `Ctrl+S`       | Save                          |
-| `Ctrl+Shift+S` | Save As                       |
-| `Ctrl+F`       | Find                          |
-| `Ctrl+K`       | AI inline edit                |
-| `Ctrl+J`       | Join hard-wrapped lines        |
-| `Alt+↑`        | Move line/block up            |
-| `Alt+↓`        | Move line/block down          |
-| `Escape`       | Cancel AI request before diff |
+| Shortcut       | Action                                                                                              |
+| -------------- | --------------------------------------------------------------------------------------------------- |
+| `Ctrl+N`       | New tab                                                                                             |
+| `Ctrl+W`       | Close active tab                                                                                    |
+| `Ctrl+O`       | Open file                                                                                           |
+| `Ctrl+S`       | Save                                                                                                |
+| `Ctrl+Shift+S` | Save As                                                                                             |
+| `Ctrl+F`       | Find                                                                                                |
+| `Ctrl+K`       | AI inline edit                                                                                      |
+| `Ctrl+J`       | Join hard-wrapped lines                                                                             |
+| `Alt+↑`        | Move line/block up                                                                                  |
+| `Alt+↓`        | Move line/block down                                                                                |
+| `Escape`       | Cancel a loading AI request; otherwise close the AI prompt and find bar (not while a diff is shown) |
 
 ### Editor-local
 
@@ -252,7 +256,6 @@ See [Streaming and review](#streaming-and-review) for AI diff behavior and the `
 ## Documentation
 
 - Feature backlog: [`FEATURES.md`](FEATURES.md)
-- Vendor references: [`docs/vendor/`](docs/vendor/)
 
 ---
 

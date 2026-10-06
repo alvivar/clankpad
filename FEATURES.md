@@ -30,7 +30,7 @@ Moving between files and within files should be near-instant.
 - [ ] **Go to tab by number (`Ctrl+1`–`Ctrl+9`)** — jump to tab N directly. `Ctrl+9` always goes to the last tab.
 - [ ] **Reopen closed tab (`Ctrl+Shift+T`)** — undo the last tab close. Keep a stack of recently closed tabs (path + content + cursor position). Essential for accidental closes.
 - [ ] **Tab context menu (right-click)** — Close, Close Others, Close to the Right, Close Saved, Copy Path, Reveal in Explorer. Standard tab context operations.
-- [ ] **Tab reordering (drag & drop)** — reposition tabs by dragging. Persisted in session.
+- [x] **Tab reordering (drag & drop)** — reposition tabs by dragging. Persisted in session.
 - [ ] **Recent files** — track the last N opened files. Accessible via a shortcut or menu. Speeds up reopening files without a full file picker.
 - [ ] **Ctrl+D — select next occurrence** — with text selected, pressing Ctrl+D adds the next occurrence to the selection (multi-cursor). Powerful for batch renaming.
 
