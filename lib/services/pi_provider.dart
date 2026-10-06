@@ -65,6 +65,15 @@ class PiProvider {
 
   String? get lastWarning => _lastWarning;
 
+  // Lets abort() stop a request before its prompt is sent. Pi's abort command
+  // cannot cancel setup because no generation is running yet.
+  bool _streamActive = false;
+  bool _abortRequested = false;
+
+  // IOSink rejects writes while the prompt flush is pending. Abort is retained
+  // during that window and sent once prompt transmission completes.
+  bool _promptSent = false;
+
   // ── Public API ──────────────────────────────────────────────────────────────
 
   Future<AiProviderModels> fetchModels() async {
@@ -181,6 +190,7 @@ class PiProvider {
   /// on the previous session/model.
   ///
   /// Completes normally when Pi reports a successful answer or an [abort].
+  /// An abort during setup completes without sending the prompt.
   /// Throws [AiProviderError] on process launch failure or failed generation.
   Stream<String> streamEdit({
     required String documentText,
@@ -192,11 +202,14 @@ class PiProvider {
     int? insertOffset,
   }) async* {
     _lastWarning = null; // clear from any previous call
-    await _ensureRunning();
+    _streamActive = true;
+    _abortRequested = false;
+    _promptSent = false;
 
     StreamController<String>? controller;
     String? modelSwitchError;
     var agentEndReceived = false;
+    var abortedBeforePrompt = false;
 
     // Setup: await each response before the next command, so Pi's async
     // command handlers (set_model, new_session) are fully committed before
@@ -208,6 +221,11 @@ class PiProvider {
     // Timeouts, process exits, and other transport failures bubble up as
     // AiProviderError and abort the edit.
     try {
+      await _ensureRunning();
+      if (_abortRequested) {
+        abortedBeforePrompt = true;
+        return;
+      }
       if (modelId != null) {
         try {
           await sendCommand({
@@ -218,6 +236,10 @@ class PiProvider {
         } on _PiCommandRejected catch (e) {
           modelSwitchError = e.message;
         }
+        if (_abortRequested) {
+          abortedBeforePrompt = true;
+          return;
+        }
       }
       try {
         await sendCommand({
@@ -227,9 +249,17 @@ class PiProvider {
       } on _PiCommandRejected catch (e) {
         modelSwitchError ??= e.message;
       }
+      if (_abortRequested) {
+        abortedBeforePrompt = true;
+        return;
+      }
       // new_session: both rejection and transport failure are fatal — we
       // can't run a prompt without a fresh session.
       await sendCommand({'type': 'new_session'});
+      if (_abortRequested) {
+        abortedBeforePrompt = true;
+        return;
+      }
 
       // Setup responses use _pendingCommands, not the streaming controller.
       // Install the sink before sending the prompt so no fast events are lost.
@@ -244,6 +274,8 @@ class PiProvider {
           insertOffset: insertOffset,
         ),
       });
+      _promptSent = true;
+      if (_abortRequested) await _writeCommand({'type': 'abort'});
 
       await for (final line in controller.stream) {
         if (line.trim().isEmpty) continue;
@@ -311,13 +343,15 @@ class PiProvider {
         }
       }
     } finally {
+      _streamActive = false;
+      _promptSent = false;
       _lineController = null;
       // close() marks the sink closed synchronously. Its done future can
       // never finish if prompt transmission failed before the first listener.
       if (controller != null && !controller.isClosed) {
         unawaited(controller.close());
       }
-      if (!agentEndReceived) {
+      if (!agentEndReceived && !abortedBeforePrompt) {
         await _killProcess();
       }
     }
@@ -331,11 +365,16 @@ class PiProvider {
     }
   }
 
-  /// Sends `{"type":"abort"}` to Pi's stdin.
+  /// Stops the active [streamEdit] request.
   ///
-  /// Pi stops generation and emits `agent_end`, completing the stream normally.
-  /// The process stays warm. Safe to call when no stream is active — no-op.
+  /// During setup, the request completes before sending its prompt. Once the
+  /// prompt has been sent, Pi receives `{"type":"abort"}`, emits `agent_end`,
+  /// and the process stays warm. No-op when no stream is active.
   void abort() {
+    if (!_streamActive) return;
+    _abortRequested = true;
+    // Setup and prompt transmission observe _abortRequested when they finish.
+    if (!_promptSent) return;
     final proc = _process;
     if (proc == null) return;
     try {

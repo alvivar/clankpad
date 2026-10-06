@@ -20,10 +20,15 @@ class EditorScreen extends StatefulWidget {
   final EditorState editorState;
   final Future<void> Function() onExitRequested;
 
+  /// Replaces the production Pi backend in widget lifecycle tests.
+  @visibleForTesting
+  final PiProvider? piProvider;
+
   const EditorScreen({
     super.key,
     required this.editorState,
     required this.onExitRequested,
+    this.piProvider,
   });
 
   @override
@@ -42,13 +47,20 @@ class _EditorScreenState extends State<EditorScreen> {
   // Snapshot captured when the Ctrl+K popup opens.
   String _snapshotDocumentText = '';
   TextSelection _snapshotSelection = const TextSelection.collapsed(offset: 0);
-  int? _snapshotTabId; // safety-net: apply diff to the tab that was snapshotted
+  int? _snapshotTabId; // apply the diff only to the tab that was snapshotted
 
   // Diff view state — populated as chunks arrive from the AI stream.
   bool _diffVisible = false;
   bool _aiStreaming = false;
   String _diffEditTarget = '';
   String _diffProposed = '';
+
+  // A provider stream can outlive its UI after cancel, reject, or early
+  // accept. Ctrl+K stays unavailable until that stream has terminated.
+  bool _aiRequestRunning = false;
+
+  // Whether the running stream may still update the loading or diff UI.
+  bool _aiRequestOwnsUi = false;
 
   // Error banner — set when Pi fails; cleared on dismiss or next Ctrl+K.
   String? _errorBanner;
@@ -83,7 +95,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // ── AI provider ──────────────────────────────────────────────────────────────
 
-  final _pi = PiProvider();
+  late final PiProvider _pi = widget.piProvider ?? PiProvider();
 
   // ── Model / thinking state ──────────────────────────────────────────────────
 
@@ -494,8 +506,8 @@ class _EditorScreenState extends State<EditorScreen> {
   // ── AI prompt ────────────────────────────────────────────────────────────────
 
   void _openAiPrompt() {
-    // Block if another overlay is already active.
-    if (_aiPromptVisible || _diffVisible) return;
+    // Block during prompt/loading/diff, and while an abandoned request drains.
+    if (_aiActive || _aiRequestRunning) return;
 
     final controller = _state.activeTab.controller;
 
@@ -634,21 +646,17 @@ class _EditorScreenState extends State<EditorScreen> {
         : _promptHistory[_historyIndex];
   }
 
-  /// Returns the tab that was active when the AI snapshot was taken.
-  /// Falls back to [EditorState.activeTab] if the tab was closed in the
-  /// interim (should not happen with the structural-action guards, but
-  /// provides a safe fallback).
-  EditorTab get _snapshotTab {
-    if (_snapshotTabId != null) {
-      for (final t in _state.tabs) {
-        if (t.id == _snapshotTabId) return t;
-      }
+  /// Returns the tab that was active when the AI snapshot was taken, or null
+  /// if it is no longer open. Never substitute another tab for an AI edit.
+  EditorTab? get _snapshotTab {
+    for (final t in _state.tabs) {
+      if (t.id == _snapshotTabId) return t;
     }
-    return _state.activeTab;
+    return null;
   }
 
   void _dismissAiPrompt() {
-    _snapshotTab.controller.clearEditTarget();
+    _snapshotTab?.controller.clearEditTarget();
     _snapshotTabId = null;
     setState(() => _aiPromptVisible = false);
     // _editorFocusNode is permanently attached to the TextField (no ValueKey,
@@ -659,6 +667,10 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Future<void> _submitAiPrompt(String prompt) async {
+    // The popup remains mounted until the next frame, so its callback can fire
+    // again after the first submission has hidden it and started a request.
+    if (!_aiPromptVisible || _aiRequestRunning) return;
+
     // Auto-select paragraph when cursor has no selection.
     if (_snapshotSelection.isCollapsed) {
       final range = _paragraphRangeAt(
@@ -696,6 +708,8 @@ class _EditorScreenState extends State<EditorScreen> {
       _aiPromptVisible = false;
       _editorReadOnly =
           true; // locked until diff is accepted/rejected/cancelled
+      _aiRequestRunning = true;
+      _aiRequestOwnsUi = true;
       _aiStreaming = true;
       _diffProposed = '';
       _errorBanner = null; // clear any previous error
@@ -714,9 +728,10 @@ class _EditorScreenState extends State<EditorScreen> {
         thinkingLevel: _thinkingLevel,
         insertOffset: sel.isCollapsed ? sel.start : null,
       )) {
-        // Exit if the widget was disposed or the user cancelled (which sets
-        // _editorReadOnly = false) before the diff was opened.
-        if (!mounted || !_editorReadOnly) return;
+        if (!mounted) return;
+        // Cancel, reject, or early accept released this request's UI. Stop
+        // listening so later chunks cannot update another edit.
+        if (!_aiRequestOwnsUi) break;
 
         if (!diffOpened) {
           // First chunk: open the diff view and focus it.
@@ -735,10 +750,11 @@ class _EditorScreenState extends State<EditorScreen> {
         }
       }
 
+      if (!mounted || !_aiRequestOwnsUi) return;
+
       // If Pi completed without emitting any text_delta chunks, still open the
       // diff so the user can deterministically accept/reject an empty result.
-      // Skip this when the user cancelled during loading (_editorReadOnly=false).
-      if (!diffOpened && mounted && _editorReadOnly) {
+      if (!diffOpened) {
         diffOpened = true;
         setState(() {
           _diffVisible = true;
@@ -750,14 +766,12 @@ class _EditorScreenState extends State<EditorScreen> {
         });
       }
 
-      if (mounted) {
-        setState(() => _aiStreaming = false);
-      }
+      setState(() => _aiStreaming = false);
 
       // Stream completed normally. Surface a non-fatal model-switch warning
       // if Pi rejected set_model / set_thinking_level (prompt still ran).
       final switchErr = _pi.lastWarning;
-      if (switchErr != null && mounted) {
+      if (switchErr != null) {
         setState(() => _errorBanner = 'Model switch failed: $switchErr');
       }
     } on AiProviderError catch (e) {
@@ -773,16 +787,21 @@ class _EditorScreenState extends State<EditorScreen> {
       // If an error ended the stream after the diff opened, auto-reject the
       // partial diff: a single Enter would otherwise accept incomplete output.
       if (mounted) {
-        final autoRejecting = errored && _diffVisible;
+        final ownsUi = _aiRequestOwnsUi;
+        final autoRejecting = ownsUi && errored && _diffVisible;
         if (autoRejecting) {
           // Match _rejectDiff: clear highlight and prevent accepting partial output.
-          _snapshotTab.controller.clearEditTarget();
+          _snapshotTab?.controller.clearEditTarget();
           _snapshotTabId = null;
         }
         setState(() {
-          _aiStreaming = false;
-          if (autoRejecting) _diffVisible = false;
-          if (!_diffVisible) _editorReadOnly = false;
+          _aiRequestRunning = false;
+          _aiRequestOwnsUi = false;
+          if (ownsUi) {
+            _aiStreaming = false;
+            if (autoRejecting) _diffVisible = false;
+            if (!_diffVisible) _editorReadOnly = false;
+          }
         });
         if (autoRejecting) _editorFocusNode.requestFocus();
       }
@@ -791,17 +810,38 @@ class _EditorScreenState extends State<EditorScreen> {
 
   /// Aborts the in-flight Pi request and immediately unlocks the editor.
   /// Only valid while the loading state is active (before the diff opens).
-  void _cancelAiRequest() {
-    _pi.abort();
+  void _cancelAiRequest() => _releaseAiEdit();
+
+  /// Releases the current AI edit's UI. A still-running stream is aborted and
+  /// may finish later, but can no longer update this or another edit.
+  void _releaseAiEdit({String? error}) {
+    if (_aiRequestRunning) _pi.abort();
+    _snapshotTab?.controller.clearEditTarget();
+    _snapshotTabId = null;
     setState(() {
+      _aiRequestOwnsUi = false;
+      _diffVisible = false;
       _aiStreaming = false;
       _editorReadOnly = false;
+      if (error != null) _errorBanner = error;
     });
+    // See _dismissAiPrompt: synchronous requestFocus() is safe here because
+    // _editorFocusNode is always in the tree.
+    _editorFocusNode.requestFocus();
   }
 
   // ── Diff accept / reject ─────────────────────────────────────────────────────
 
   void _acceptDiff() {
+    final tab = _snapshotTab;
+    if (tab == null) {
+      _releaseAiEdit(
+        error:
+            'The original tab is no longer open. The AI edit was not applied.',
+      );
+      return;
+    }
+
     final sel = _snapshotSelection;
     final docText = _snapshotDocumentText;
     final result = _diffProposed;
@@ -823,40 +863,17 @@ class _EditorScreenState extends State<EditorScreen> {
       newCursorPos = sel.start + result.length;
     }
 
-    final controller = _snapshotTab.controller;
+    final controller = tab.controller;
     controller.value = TextEditingValue(
       text: newText,
       selection: TextSelection.collapsed(offset: newCursorPos),
     );
-    controller.clearEditTarget();
-    _snapshotTabId = null;
-
-    setState(() {
-      _diffVisible = false;
-      _aiStreaming = false;
-      _editorReadOnly = false;
-    });
-    // See _dismissAiPrompt: synchronous requestFocus() is safe here because
-    // _editorFocusNode is always in the tree.
-    _editorFocusNode.requestFocus();
+    // Accepting while generating keeps the current partial result and stops
+    // the old stream before Ctrl+K can start another edit.
+    _releaseAiEdit();
   }
 
-  void _rejectDiff() {
-    // Abort Pi if the stream is still running (e.g. user rejects while
-    // tokens are still arriving). No-op if the stream has already finished.
-    _pi.abort();
-    _snapshotTab.controller.clearEditTarget();
-    _snapshotTabId = null;
-    // Text is unchanged — no controller update needed.
-    setState(() {
-      _diffVisible = false;
-      _aiStreaming = false;
-      _editorReadOnly = false;
-    });
-    // See _dismissAiPrompt: synchronous requestFocus() is safe here because
-    // _editorFocusNode is always in the tree.
-    _editorFocusNode.requestFocus();
-  }
+  void _rejectDiff() => _releaseAiEdit();
 
   // ── Tab close ────────────────────────────────────────────────────────────────
 

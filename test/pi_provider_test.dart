@@ -51,6 +51,63 @@ void main() {
     await _expectFailureAndRetry(failed, 'Pi process exited unexpectedly.');
   });
 
+  test('abort during setup prevents prompt and keeps Pi warm', () async {
+    final process = _FakeProcess(deferResponseFor: 'set_thinking_level');
+    var starts = 0;
+    final provider = PiProvider(
+      startProcess: (executable, arguments, {required runInShell}) async {
+        starts++;
+        return process;
+      },
+    );
+    addTearDown(provider.dispose);
+
+    final cancelled = _request(provider);
+    await process.deferredCommand.future.timeout(const Duration(seconds: 1));
+    provider.abort();
+    process.respondToDeferred();
+
+    expect(await cancelled.timeout(const Duration(seconds: 1)), isEmpty);
+    expect(process.input.commands, ['set_thinking_level']);
+    expect(process.killed, isFalse);
+    expect(await _request(provider).timeout(const Duration(seconds: 1)), [
+      'replacement',
+    ]);
+    expect(starts, 1);
+    expect(process.input.commands, [
+      'set_thinking_level',
+      'set_thinking_level',
+      'new_session',
+      'prompt',
+    ]);
+  });
+
+  test('abort during prompt flush is sent after transmission', () async {
+    final process = _FakeProcess(holdPromptFlush: true);
+    var starts = 0;
+    final provider = PiProvider(
+      startProcess: (executable, arguments, {required runInShell}) async {
+        starts++;
+        return process;
+      },
+    );
+    addTearDown(provider.dispose);
+
+    final cancelled = _request(provider);
+    await process.promptWritten.future.timeout(const Duration(seconds: 1));
+    provider.abort();
+    expect(process.input.commands.last, 'prompt');
+
+    process.releaseFlush();
+    expect(await cancelled.timeout(const Duration(seconds: 1)), isEmpty);
+    expect(process.input.commands.sublist(2), ['prompt', 'abort']);
+    expect(process.killed, isFalse);
+    expect(await _request(provider).timeout(const Duration(seconds: 1)), [
+      'replacement',
+    ]);
+    expect(starts, 1);
+  });
+
   test('dispose does not await an unlistened prompt controller', () async {
     final failed = _FakeProcess(holdPromptFlush: true);
     final retry = _FakeProcess();
@@ -131,6 +188,7 @@ class _FakeProcess implements Process {
     String? flushFailureAt,
     this.exitDuringSetupFlush = false,
     this.holdPromptFlush = false,
+    this.deferResponseFor,
   }) {
     input = _FakeInput(
       onCommand: _handleCommand,
@@ -144,7 +202,10 @@ class _FakeProcess implements Process {
   final bool rejectSession;
   final bool ignoreSession;
   final bool exitDuringSetupFlush;
-  final bool holdPromptFlush;
+  bool holdPromptFlush;
+  String? deferResponseFor;
+  Map<String, dynamic>? _deferred;
+  final deferredCommand = Completer<void>();
   final output = StreamController<List<int>>();
   final promptWritten = Completer<void>();
   final _flushGate = Completer<void>();
@@ -168,16 +229,41 @@ class _FakeProcess implements Process {
     output.add(utf8.encode('${jsonEncode(event)}\n'));
   }
 
+  void releaseFlush() => _flushGate.complete();
+
+  void respondToDeferred() {
+    _respond(_deferred!);
+    _deferred = null;
+  }
+
   void _handleCommand(Map<String, dynamic> command) {
     final type = command['type'];
+    if (type == deferResponseFor) {
+      deferResponseFor = null;
+      _deferred = command;
+      deferredCommand.complete();
+      return;
+    }
     if (exitDuringSetupFlush && type == 'set_thinking_level') {
       unawaited(output.close());
       return;
     }
     if (type == 'new_session' && ignoreSession) return;
+    if (type == 'abort') {
+      _emit({
+        'type': 'agent_end',
+        'messages': [
+          {'role': 'assistant', 'stopReason': 'aborted'},
+        ],
+      });
+      return;
+    }
     if (type == 'prompt') {
-      promptWritten.complete();
-      if (holdPromptFlush) return;
+      if (!promptWritten.isCompleted) promptWritten.complete();
+      if (holdPromptFlush) {
+        holdPromptFlush = false;
+        return;
+      }
       _emit({
         'type': 'message_update',
         'assistantMessageEvent': {'type': 'text_delta', 'delta': 'replacement'},
@@ -190,6 +276,11 @@ class _FakeProcess implements Process {
       });
       return;
     }
+    _respond(command);
+  }
+
+  void _respond(Map<String, dynamic> command) {
+    final type = command['type'];
     _emit({
       'type': 'response',
       'id': command['id'],
@@ -227,9 +318,12 @@ class _FakeInput implements IOSink {
   final String holdAt;
   final commands = <String>[];
   bool closed = false;
+  bool _flushPending = false;
 
   @override
   void writeln([Object? object = '']) {
+    // Match IOSink: writes are rejected while a flush is pending.
+    if (_flushPending) throw StateError('StreamSink is bound to a stream');
     final command = jsonDecode(object as String) as Map<String, dynamic>;
     final type = command['type'] as String;
     commands.add(type);
@@ -243,7 +337,12 @@ class _FakeInput implements IOSink {
       throw const SocketException('stdin broken pipe');
     }
     if (commands.last == holdAt && heldFlush != null) {
-      await heldFlush!.future;
+      _flushPending = true;
+      try {
+        await heldFlush!.future;
+      } finally {
+        _flushPending = false;
+      }
     }
   }
 
