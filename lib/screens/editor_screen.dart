@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../models/editor_tab.dart';
 import '../models/intents.dart';
 import '../services/ai_provider.dart';
+import '../services/move_lines.dart';
 import '../services/pi_provider.dart';
 import '../services/text_join.dart';
 import '../state/editor_state.dart';
@@ -168,42 +169,14 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // ── Line operations ──────────────────────────────────────────────────────────
 
-  /// Moves the line(s) covered by the current selection up (-1) or down (+1)
-  /// by swapping with the adjacent line. Multi-line selections move as a block.
-  /// No-op when the editor is not focused, is read-only, or is already at the
-  /// boundary.
+  /// Moves the line(s) covered by the selection up (-1) or down (+1); see
+  /// `moveLines` for line-ending and selection rules. No-op when the editor is
+  /// not focused, is read-only, or is already at the boundary.
   void _moveLines(int direction) {
     if (!_editorFocusNode.hasFocus || _editorReadOnly) return;
     final controller = _state.activeTab.controller;
-    final text = controller.text;
-    final selection = controller.selection;
-    if (!selection.isValid || text.isEmpty) return;
-
-    final lines = text.split('\n');
-    final firstLine = text.substring(0, selection.start).split('\n').length - 1;
-    final lastLine = text.substring(0, selection.end).split('\n').length - 1;
-
-    if (direction == -1 && firstLine == 0) return;
-    if (direction == 1 && lastLine == lines.length - 1) return;
-
-    final int delta;
-    if (direction == -1) {
-      final above = lines.removeAt(firstLine - 1);
-      lines.insert(lastLine, above);
-      delta = -(above.length + 1);
-    } else {
-      final below = lines.removeAt(lastLine + 1);
-      lines.insert(firstLine, below);
-      delta = below.length + 1;
-    }
-
-    controller.value = TextEditingValue(
-      text: lines.join('\n'),
-      selection: TextSelection(
-        baseOffset: selection.baseOffset + delta,
-        extentOffset: selection.extentOffset + delta,
-      ),
-    );
+    final moved = moveLines(controller.value, direction);
+    if (moved != null) controller.value = moved;
   }
 
   /// Joins hard-wrapped lines within the selection, or the whole document when
