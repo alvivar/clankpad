@@ -78,6 +78,13 @@ class _EditorScreenState extends State<EditorScreen> {
   List<int> _searchMatches = const [];
   int _searchMatchIndex = -1; // 0-based; -1 = no matches
 
+  // Active document watched while Find is open, so text edits refresh the
+  // matches. EditorState deliberately does not notify on keystrokes.
+  HighlightingController? _searchedController;
+  // Last text seen from [_searchedController]. The controller also notifies
+  // for selection and highlight changes, which must not trigger a re-search.
+  String _searchedText = '';
+
   // ── Misc ─────────────────────────────────────────────────────────────────────
 
   // Guards against re-entrant close attempts while a dialog is showing.
@@ -288,6 +295,7 @@ class _EditorScreenState extends State<EditorScreen> {
       _searchMatches = matches;
       _searchMatchIndex = matches.isEmpty ? -1 : 0;
     });
+    _watchActiveText();
     if (matches.isNotEmpty) {
       _jumpToMatch(0);
     } else {
@@ -303,6 +311,7 @@ class _EditorScreenState extends State<EditorScreen> {
     for (final tab in _state.tabs) {
       tab.controller.clearMatches();
     }
+    _unwatchText();
     setState(() {
       _searchVisible = false;
       _searchMatches = const [];
@@ -339,6 +348,44 @@ class _EditorScreenState extends State<EditorScreen> {
         (_searchMatchIndex - 1 + _searchMatches.length) % _searchMatches.length;
     setState(() => _searchMatchIndex = prev);
     _jumpToMatch(prev);
+  }
+
+  void _watchActiveText() {
+    final controller = _state.activeTab.controller;
+    if (identical(controller, _searchedController)) return;
+    // Safe even if the previous tab was closed: removeListener is allowed
+    // after dispose.
+    _searchedController?.removeListener(_onSearchedTextChanged);
+    _searchedController = controller..addListener(_onSearchedTextChanged);
+    _searchedText = controller.text;
+  }
+
+  void _unwatchText() {
+    _searchedController?.removeListener(_onSearchedTextChanged);
+    _searchedController = null;
+  }
+
+  // Refreshes matches after a document edit without moving the caret or
+  // focus. The current match keeps its index, clamped to the new count.
+  void _onSearchedTextChanged() {
+    final controller = _searchedController!;
+    if (controller.text == _searchedText) return;
+    _searchedText = controller.text;
+
+    final query = _searchController.text;
+    final matches = _computeMatches(_searchedText, query);
+    final index = matches.isEmpty
+        ? -1
+        : _searchMatchIndex.clamp(0, matches.length - 1);
+    setState(() {
+      _searchMatches = matches;
+      _searchMatchIndex = index;
+    });
+    if (matches.isEmpty) {
+      controller.clearMatches();
+    } else {
+      controller.setMatches(matches, query.length, index);
+    }
   }
 
   /// Updates the controller's match highlights, scrolls the editor to the
@@ -380,6 +427,7 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void dispose() {
     _state.removeListener(_onEditorStateChanged);
+    _unwatchText();
     _editorFocusNode.dispose();
     _diffFocusNode.dispose();
     _searchController.dispose();
@@ -396,6 +444,7 @@ class _EditorScreenState extends State<EditorScreen> {
         // Re-run search against the new tab's content and keep focus in the
         // find bar. _jumpToMatch (called by _onSearchQueryChanged when matches
         // exist) handles the editor→search focus dance for scrolling.
+        _watchActiveText();
         _onSearchQueryChanged(_searchController.text);
       } else if (!_aiPromptVisible && !_diffVisible) {
         // Restore focus to the editor after every structural change.
