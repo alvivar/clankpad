@@ -8,7 +8,7 @@ A minimalist, distraction-free plain-text editor with multi-tab support, hot-exi
 
 ## Requirements
 
-- [Flutter SDK](https://docs.flutter.dev/get-started/install) (Dart SDK ^3.11.0)
+- [Flutter SDK](https://docs.flutter.dev/get-started/install) >=3.44.0 with Dart SDK ^3.12.0
 - Windows (primary target; macOS/Linux runners exist but are less tested)
 - Optional, for AI features: [Node.js](https://nodejs.org/) + [Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) (verified with Pi 0.85.1)
 
