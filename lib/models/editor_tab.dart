@@ -6,8 +6,8 @@ import 'package:flutter/material.dart';
 /// Two independent layers, each managed separately:
 ///
 /// **Search matches** (`setMatches` / `clearMatches`) — painted while the find
-/// bar is open. All matches use `primaryContainer`; the current match uses
-/// `primary` at 35 % opacity.
+/// bar is open. Dark mode uses dedicated VS Code match colors; light mode
+/// uses `primaryContainer` and `primary` at 35 % opacity for the current match.
 ///
 /// **Edit target** (`setEditTarget` / `clearEditTarget`) — painted while the
 /// Ctrl+K popup or AI diff is active, showing the user what text will be (or
@@ -90,8 +90,14 @@ class HighlightingController extends TextEditingController {
     }
 
     if (hasMatches) {
-      final otherColor = colorScheme.primaryContainer;
-      final currentColor = colorScheme.primary.withValues(alpha: 0.35);
+      // Search highlights must not share the blue action / status-chip roles.
+      final isDark = colorScheme.brightness == Brightness.dark;
+      final otherColor = isDark
+          ? const Color(0x55EA5C00)
+          : colorScheme.primaryContainer;
+      final currentColor = isDark
+          ? const Color(0xFF515C6A)
+          : colorScheme.primary.withValues(alpha: 0.35);
       for (var i = 0; i < _matchOffsets.length; i++) {
         final s = _matchOffsets[i];
         if (s >= text.length) break;

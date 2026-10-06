@@ -1050,7 +1050,7 @@ class _EditorScreenState extends State<EditorScreen> {
               if (_errorBanner != null)
                 DecoratedBox(
                   decoration: const BoxDecoration(
-                    color: Color(0xFF252C30),
+                    color: Color(0xFF252526),
                     border: Border(
                       left: BorderSide(color: Color(0xFFD99B79), width: 3),
                     ),
@@ -1063,7 +1063,7 @@ class _EditorScreenState extends State<EditorScreen> {
                           child: Text(
                             _errorBanner!,
                             style: const TextStyle(
-                              color: Color(0xFFE0E6E9),
+                              color: Color(0xFFCCCCCC),
                               fontSize: 13,
                             ),
                           ),
@@ -1072,7 +1072,7 @@ class _EditorScreenState extends State<EditorScreen> {
                           onPressed: () => setState(() => _errorBanner = null),
                           icon: const Icon(Icons.close),
                           iconSize: 16,
-                          color: const Color(0xFFE0E6E9),
+                          color: const Color(0xFFCCCCCC),
                           visualDensity: VisualDensity.compact,
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
