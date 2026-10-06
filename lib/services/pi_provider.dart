@@ -13,16 +13,26 @@ class _PiCommandRejected extends AiProviderError {
   const _PiCommandRejected(super.message);
 }
 
+/// Process launcher seam for deterministic, offline transport-failure tests.
+typedef PiProcessStarter =
+    Future<Process> Function(
+      String executable,
+      List<String> arguments, {
+      required bool runInShell,
+    });
+
 /// Pi backend using an RPC subprocess (`pi --mode rpc`).
 ///
 /// Pi is spawned on the first [fetchModels] or [streamEdit] call and kept alive
 /// between invocations. Pi owns all auth and model configuration — Clankpad
 /// has no API key management.
 class PiProvider {
-  PiProvider({this.piExecutable = 'pi'});
+  PiProvider({this.piExecutable = 'pi', PiProcessStarter? startProcess})
+    : _startProcess = startProcess ?? Process.start;
 
   /// Executable name or absolute path. Defaults to `pi` (resolved via PATH).
   final String piExecutable;
+  final PiProcessStarter _startProcess;
 
   Process? _process;
 
@@ -30,11 +40,15 @@ class PiProvider {
   // Cleared on success/error so a failed cold start can retry.
   Future<void>? _starting;
 
+  // An exit callback and request finally can enter cleanup together. Both must
+  // await the same shutdown before another request starts a fresh process.
+  Future<void>? _stopping;
+
   // Persistent subscription forwarding stdout lines to the per-invocation
   // controller. Created at spawn time, cancelled only in dispose() or on error.
   StreamSubscription<String>? _stdoutSub;
 
-  // Per-invocation sink. Created at the start of streamEdit, closed in finally.
+  // Per-invocation sink. Created after setup, closed in finally.
   StreamController<String>? _lineController;
 
   // For sendCommand — id-tagged responses awaited via completer. Used for
@@ -126,21 +140,29 @@ class PiProvider {
     final id = 'c${_cmdCounter++}';
     final completer = Completer<Map<String, dynamic>>();
     _pendingCommands[id] = completer;
-    _process!.stdin.writeln(jsonEncode({...cmd, 'id': id}));
-    await _process!.stdin.flush();
-    final response = await completer.future.timeout(
-      const Duration(seconds: 5),
-      onTimeout: () {
-        _pendingCommands.remove(id);
-        throw AiProviderError("Command timed out: ${cmd['type']}");
-      },
-    );
-    if (response['success'] == false) {
-      throw _PiCommandRejected(
-        response['error'] as String? ?? "Command failed: ${cmd['type']}",
-      );
+    try {
+      // Observe the response while flushing: an exit or write failure can
+      // arrive before flush finishes. Future.wait also observes late errors.
+      final results =
+          await Future.wait<dynamic>([
+            completer.future,
+            _writeCommand({...cmd, 'id': id}),
+          ], eagerError: true).timeout(
+            const Duration(seconds: 5),
+            onTimeout: () {
+              throw AiProviderError("Command timed out: ${cmd['type']}");
+            },
+          );
+      final response = results[0] as Map<String, dynamic>;
+      if (response['success'] == false) {
+        throw _PiCommandRejected(
+          response['error'] as String? ?? "Command failed: ${cmd['type']}",
+        );
+      }
+      return response;
+    } finally {
+      _pendingCommands.remove(id);
     }
-    return response;
   }
 
   /// Spawns Pi on the first call (or after a crash), reuses the warm process
@@ -172,9 +194,9 @@ class PiProvider {
     _lastWarning = null; // clear from any previous call
     await _ensureRunning();
 
-    final controller = StreamController<String>();
-    _lineController = controller;
+    StreamController<String>? controller;
     String? modelSwitchError;
+    var agentEndReceived = false;
 
     // Setup: await each response before the next command, so Pi's async
     // command handlers (set_model, new_session) are fully committed before
@@ -208,17 +230,12 @@ class PiProvider {
       // new_session: both rejection and transport failure are fatal — we
       // can't run a prompt without a fresh session.
       await sendCommand({'type': 'new_session'});
-    } on AiProviderError {
-      _lineController = null;
-      if (!controller.isClosed) await controller.close();
-      await _killProcess();
-      rethrow;
-    }
 
-    // Setup committed; fire the prompt. Not id-tagged — its response and
-    // all subsequent events flow through _lineController to the loop below.
-    _process!.stdin.writeln(
-      jsonEncode({
+      // Setup responses use _pendingCommands, not the streaming controller.
+      // Install the sink before sending the prompt so no fast events are lost.
+      controller = StreamController<String>();
+      _lineController = controller;
+      await _writeCommand({
         'type': 'prompt',
         'message': buildPromptMessage(
           documentText,
@@ -226,13 +243,8 @@ class PiProvider {
           userInstruction,
           insertOffset: insertOffset,
         ),
-      }),
-    );
-    await _process!.stdin.flush();
+      });
 
-    bool agentEndReceived = false;
-
-    try {
       await for (final line in controller.stream) {
         if (line.trim().isEmpty) continue;
 
@@ -300,7 +312,11 @@ class PiProvider {
       }
     } finally {
       _lineController = null;
-      if (!controller.isClosed) await controller.close();
+      // close() marks the sink closed synchronously. Its done future can
+      // never finish if prompt transmission failed before the first listener.
+      if (controller != null && !controller.isClosed) {
+        unawaited(controller.close());
+      }
       if (!agentEndReceived) {
         await _killProcess();
       }
@@ -338,15 +354,33 @@ class PiProvider {
 
     final c = _lineController;
     _lineController = null;
-    if (c != null && !c.isClosed) await c.close();
+    if (c != null && !c.isClosed) unawaited(c.close());
     await _killProcess();
   }
 
   // ── Internals ───────────────────────────────────────────────────────────────
 
+  /// Writes one RPC command and exposes transport failures to the caller.
+  Future<void> _writeCommand(Map<String, dynamic> command) async {
+    final proc = _process;
+    if (proc == null) {
+      throw const AiProviderError('Pi process exited unexpectedly.');
+    }
+    try {
+      proc.stdin.writeln(jsonEncode(command));
+      await proc.stdin.flush();
+    } on IOException catch (e) {
+      throw AiProviderError('Could not write to Pi: $e');
+    } on StateError catch (e) {
+      // IOSink throws StateError when the pipe has already been closed.
+      throw AiProviderError('Could not write to Pi: $e');
+    }
+  }
+
   /// Spawns Pi if it is not already running; returns immediately if warm.
   /// Safe under concurrent callers — see [_starting].
   Future<void> _ensureRunning() async {
+    if (_stopping != null) await _stopping;
     if (_process != null) return;
     _starting ??= _spawnProcess().whenComplete(() => _starting = null);
     await _starting;
@@ -355,7 +389,7 @@ class PiProvider {
   Future<void> _spawnProcess() async {
     final Process proc;
     try {
-      proc = await Process.start(
+      proc = await _startProcess(
         piExecutable,
         [
           '--mode',
@@ -403,9 +437,9 @@ class PiProvider {
 
   /// Routes each stdout line: id-tagged `response` events go to the matching
   /// [Completer] in [_pendingCommands]; everything else forwards to
-  /// [_lineController]. Both paths coexist during setup inside [streamEdit]:
-  /// setup responses are id-tagged and completer-routed, while prompt acks
-  /// and agent events stream through [_lineController].
+  /// [_lineController]. Setup responses are completer-routed before the
+  /// streaming controller exists; prompt acks and agent events then stream
+  /// through [_lineController].
   void _processLine(String line) {
     final Map<String, dynamic> event;
     try {
@@ -424,8 +458,6 @@ class PiProvider {
   /// Called when Pi's stdout closes — either an unexpected exit or after
   /// explicit termination.
   void _onProcessExit() {
-    _process = null;
-    _stdoutSub = null;
     // Complete any in-flight sendCommand calls with an error.
     for (final c in _pendingCommands.values) {
       c.completeError(const AiProviderError('Pi process exited unexpectedly.'));
@@ -433,15 +465,25 @@ class PiProvider {
     _pendingCommands.clear();
     final c = _lineController;
     _lineController = null;
-    if (c != null && !c.isClosed) c.close();
+    if (c != null && !c.isClosed) unawaited(c.close());
+    unawaited(_killProcess());
   }
 
   /// Cancels the stdout subscription and kills the process.
-  /// Idempotent — safe to call multiple times.
-  Future<void> _killProcess() async {
+  /// Concurrent callers await the same resource cleanup.
+  Future<void> _killProcess() {
+    return _stopping ??= _stopProcess().whenComplete(() => _stopping = null);
+  }
+
+  Future<void> _stopProcess() async {
     final proc = _process;
     if (proc == null) return;
     _process = null;
+    // Cancelling stdout bypasses _onProcessExit, so settle its waiters here.
+    for (final c in _pendingCommands.values) {
+      c.completeError(const AiProviderError('Pi process terminated.'));
+    }
+    _pendingCommands.clear();
     proc.kill();
     await _stdoutSub?.cancel();
     _stdoutSub = null;
