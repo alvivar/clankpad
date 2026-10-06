@@ -24,7 +24,15 @@ Future<void> main() async {
 class ClankpadApp extends StatefulWidget {
   final EditorState editorState;
 
-  const ClankpadApp({super.key, required this.editorState});
+  /// Replaces the %APPDATA% session directory in tests.
+  @visibleForTesting
+  final Directory? sessionDirectory;
+
+  const ClankpadApp({
+    super.key,
+    required this.editorState,
+    this.sessionDirectory,
+  });
 
   @override
   State<ClankpadApp> createState() => _ClankpadAppState();
@@ -34,8 +42,10 @@ class _ClankpadAppState extends State<ClankpadApp> {
   late final SessionService _sessionService;
   late final AppLifecycleListener _lifecycleListener;
 
+  // On a failed flush the app stays open; EditorScreen shows the error from
+  // EditorState.sessionWriteError.
   Future<void> _exitApplication() async {
-    _sessionService.flushSync();
+    if (!_sessionService.flushSync()) return;
     exit(0);
   }
 
@@ -46,16 +56,19 @@ class _ClankpadAppState extends State<ClankpadApp> {
     // SessionService registers itself as onAnyChange on the EditorState.
     // It is created AFTER restore so restore-time mutations do not trigger
     // spurious debounced writes.
-    _sessionService = SessionService(widget.editorState);
+    _sessionService = SessionService(
+      widget.editorState,
+      directory: widget.sessionDirectory,
+    );
 
     // Flush the session synchronously when the OS requests app exit
     // (normal window close on Windows). Force-close (Task Manager, SIGKILL)
     // bypasses this; debounced writes already minimise the exposure window.
+    // A failed flush cancels the close so unsaved tabs stay accessible.
     _lifecycleListener = AppLifecycleListener(
-      onExitRequested: () async {
-        _sessionService.flushSync();
-        return AppExitResponse.exit;
-      },
+      onExitRequested: () async => _sessionService.flushSync()
+          ? AppExitResponse.exit
+          : AppExitResponse.cancel,
     );
   }
 

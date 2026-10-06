@@ -1067,40 +1067,25 @@ class _EditorScreenState extends State<EditorScreen> {
 
               // Error banner — shown after a Pi failure; dismissed by ×.
               if (_errorBanner != null)
-                DecoratedBox(
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF252526),
-                    border: Border(
-                      left: BorderSide(color: Color(0xFFD99B79), width: 3),
-                    ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            _errorBanner!,
-                            style: const TextStyle(
-                              color: Color(0xFFCCCCCC),
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: () => setState(() => _errorBanner = null),
-                          icon: const Icon(Icons.close),
-                          iconSize: 16,
-                          color: const Color(0xFFCCCCCC),
-                          visualDensity: VisualDensity.compact,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                        ),
-                        const SizedBox(width: 4),
-                      ],
-                    ),
-                  ),
+                _Banner(
+                  message: _errorBanner!,
+                  onDismiss: () => setState(() => _errorBanner = null),
                 ),
+
+              // Session banner — stays until a session write succeeds, so a
+              // persistent failure is visible without repeated dialogs.
+              ValueListenableBuilder(
+                valueListenable: _state.sessionWriteError,
+                builder: (context, error, _) => error == null
+                    ? const SizedBox.shrink()
+                    : _Banner(
+                        message:
+                            "Couldn't save the session, so unsaved tabs may "
+                            'not be restored. Clankpad will stay open until '
+                            'the session can be saved; save your documents '
+                            'to keep them. Details: $error',
+                      ),
+              ),
 
               // Progress stripe + cancel button: visible while Pi is
               // running and the diff view has not yet opened.
@@ -1203,3 +1188,45 @@ class _EditorScreenState extends State<EditorScreen> {
 }
 
 enum _DirtyChoice { save, dontSave, cancel }
+
+// Message strip below the tab bar. Without [onDismiss] it has no close button.
+class _Banner extends StatelessWidget {
+  final String message;
+  final VoidCallback? onDismiss;
+
+  const _Banner({required this.message, this.onDismiss});
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        color: Color(0xFF252526),
+        border: Border(left: BorderSide(color: Color(0xFFD99B79), width: 3)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(color: Color(0xFFCCCCCC), fontSize: 13),
+              ),
+            ),
+            if (onDismiss != null)
+              IconButton(
+                onPressed: onDismiss,
+                icon: const Icon(Icons.close),
+                iconSize: 16,
+                color: const Color(0xFFCCCCCC),
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            const SizedBox(width: 4),
+          ],
+        ),
+      ),
+    );
+  }
+}

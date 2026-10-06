@@ -38,6 +38,12 @@ class EditorState extends ChangeNotifier {
   // Keys: modelProvider, modelId, thinkingLevel.
   Map<String, String> aiPrefs = {};
 
+  // Latest session-write failure, or null once a write succeeds. Set by
+  // SessionService and shown by EditorScreen as a persistent banner. A
+  // separate notifier, not notifyListeners: a structural change would
+  // schedule another session write.
+  final sessionWriteError = ValueNotifier<String?>(null);
+
   // Notices collected during session restore (missing files, etc.).
   // Consumed once by EditorScreen via takeStartupNotices().
   final List<String> _startupNotices = [];
@@ -349,6 +355,7 @@ class EditorState extends ChangeNotifier {
     for (final tab in _tabs) {
       tab.dispose();
     }
+    sessionWriteError.dispose();
     super.dispose();
   }
 }

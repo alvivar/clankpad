@@ -20,8 +20,9 @@ class SessionService {
   late final File _sessionFile;
   late final File _tmpFile;
 
-  SessionService(this._state) {
-    final dir = sessionDirectory();
+  // [directory] defaults to [sessionDirectory]; tests pass a temporary one.
+  SessionService(this._state, {Directory? directory}) {
+    final dir = directory ?? sessionDirectory();
     _sessionFile = File('${dir.path}${Platform.pathSeparator}session.json');
     _tmpFile = File('${dir.path}${Platform.pathSeparator}session.json.tmp');
 
@@ -96,9 +97,13 @@ class SessionService {
         return;
       }
       await tmp.rename(_sessionFile.path);
+      // A flushSync may have run during the rename; its result stands.
+      if (gen == _writeGen) _state.sessionWriteError.value = null;
     } catch (e) {
-      // Session write errors must never crash the app.
-      debugPrint('Session write failed: $e');
+      // Session write errors must never crash the app, but they must be
+      // visible: unsaved tabs exist only in memory until a write succeeds.
+      // A superseded write's result says nothing about the current session.
+      if (gen == _writeGen) _state.sessionWriteError.value = e.toString();
       try {
         await tmp.delete();
       } catch (_) {}
@@ -107,28 +112,34 @@ class SessionService {
 
   // Sync path: shared by flushSync. Kept separate from _write because the exit
   // contract demands the file is on disk before the function returns.
-  void _writeSync() {
+  bool _writeSync() {
     try {
       final dir = _sessionFile.parent;
       if (!dir.existsSync()) dir.createSync(recursive: true);
       _tmpFile.writeAsStringSync(_buildJson());
       _tmpFile.renameSync(_sessionFile.path);
+      _state.sessionWriteError.value = null;
+      return true;
     } catch (e) {
-      debugPrint('Session write failed: $e');
+      _state.sessionWriteError.value = e.toString();
+      return false;
     }
   }
 
   // ── Synchronous flush on exit ────────────────────────────────────────────────
 
-  // Called from AppLifecycleListener.onExitRequested.
+  // Called by both exit paths before the app closes.
   // Cancels the pending debounce timer and writes synchronously so no changes
   // are lost when the window is closed within the 500 ms debounce window.
   // Bumps [_writeGen] so any in-flight async _write bails on its next await.
-  void flushSync() {
+  //
+  // Returns false when the write failed. Callers must then keep the app open:
+  // exiting would lose any tab content that exists only in memory.
+  bool flushSync() {
     _debounce?.cancel();
     _debounce = null;
     _writeGen++;
-    _writeSync();
+    return _writeSync();
   }
 
   // ── JSON serialisation ───────────────────────────────────────────────────────
@@ -167,8 +178,11 @@ class SessionService {
 
   // ── Lifecycle ────────────────────────────────────────────────────────────────
 
+  // Bumping [_writeGen] makes an in-flight _write drop its result: the owner
+  // disposes EditorState (and its error notifier) right after this.
   void dispose() {
     _debounce?.cancel();
+    _writeGen++;
     _state.onAnyChange = null;
   }
 }
