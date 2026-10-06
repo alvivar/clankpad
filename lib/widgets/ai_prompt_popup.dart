@@ -28,14 +28,14 @@ class AiPromptPopup extends StatefulWidget {
   final VoidCallback onDismiss;
   final ValueChanged<String> onSubmit;
 
-  /// Called when the user presses Up on the first line of the prompt field.
-  /// Receives the current field text; returns the text to show, or null to
-  /// let the TextField handle the key normally.
+  /// Called when the user presses a plain Up with the caret at the start of
+  /// the prompt field (no selection). Receives the current field text; returns
+  /// the text to show, or null to let the TextField handle the key normally.
   final String? Function(String currentText)? onHistoryUp;
 
-  /// Called when the user presses Down on the last line of the prompt field.
-  /// Receives the current field text; returns the text to show, or null to
-  /// let the TextField handle the key normally.
+  /// Called when the user presses a plain Down with the caret at the end of
+  /// the prompt field (no selection). Receives the current field text; returns
+  /// the text to show, or null to let the TextField handle the key normally.
   final String? Function(String currentText)? onHistoryDown;
 
   /// Current model/thinking state shown in the footer toolbar.
@@ -66,6 +66,11 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
   final _promptController = TextEditingController();
   final _textFieldFocusNode = FocusNode();
 
+  // True from a history recall until the next frame has laid it out. Until
+  // then the TextField's Up/Down handling would read the previously laid-out
+  // text and write it back over the recalled prompt.
+  bool _recallNotLaidOut = false;
+
   @override
   void initState() {
     super.initState();
@@ -81,18 +86,42 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
     super.dispose();
   }
 
-  // ── Cursor-position helpers ──────────────────────────────────────────────────
+  // ── Prompt history ───────────────────────────────────────────────────────────
 
-  bool _isOnFirstLine() {
-    final offset = _promptController.selection.baseOffset;
-    if (offset < 0) return false;
-    return !_promptController.text.substring(0, offset).contains('\n');
+  // History is browsed only by a plain Up/Down with the caret at the very start
+  // or end of the prompt (and no IME composition in progress). Anywhere else
+  // the TextField moves the caret or extends the selection as usual.
+  bool _isHistoryKey(int caretOffset) {
+    final keyboard = HardwareKeyboard.instance;
+    final value = _promptController.value;
+    return !keyboard.isShiftPressed &&
+        !keyboard.isControlPressed &&
+        !keyboard.isAltPressed &&
+        !keyboard.isMetaPressed &&
+        value.selection.isCollapsed &&
+        value.selection.baseOffset == caretOffset &&
+        value.composing.isCollapsed;
   }
 
-  bool _isOnLastLine() {
-    final offset = _promptController.selection.baseOffset;
-    if (offset < 0) return false;
-    return !_promptController.text.substring(offset).contains('\n');
+  // Shows a recalled prompt, or lets the TextField handle the key when there
+  // is nothing to recall. The caret stays at the boundary it came from, so
+  // repeating the key keeps browsing.
+  KeyEventResult _showRecalled(String? text, {required bool caretAtStart}) {
+    if (text == null) return KeyEventResult.ignored;
+    _promptController.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(
+        offset: caretAtStart ? 0 : text.length,
+      ),
+    );
+    // Released after the next frame. Request that frame explicitly: recalling
+    // the text already shown does not notify, so nothing else would.
+    _recallNotLaidOut = true;
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _recallNotLaidOut = false,
+    );
+    WidgetsBinding.instance.ensureVisualUpdate();
+    return KeyEventResult.handled;
   }
 
   // ── Submit ───────────────────────────────────────────────────────────────────
@@ -137,39 +166,29 @@ class _AiPromptPopupState extends State<AiPromptPopup> {
                     Focus(
                       onKeyEvent: (node, event) {
                         if (event is KeyDownEvent || event is KeyRepeatEvent) {
-                          if (event.logicalKey == LogicalKeyboardKey.arrowUp &&
-                              _isOnFirstLine()) {
-                            final text = widget.onHistoryUp?.call(
-                              _promptController.text,
-                            );
-                            if (text != null) {
-                              _promptController.value = TextEditingValue(
-                                text: text,
-                                selection: TextSelection.collapsed(
-                                  offset: text.length,
-                                ),
-                              );
-                              return KeyEventResult.handled;
-                            }
-                            return KeyEventResult.ignored;
+                          final key = event.logicalKey;
+                          final isUpOrDown =
+                              key == LogicalKeyboardKey.arrowUp ||
+                              key == LogicalKeyboardKey.arrowDown;
+                          // Consumed until a recall is laid out (one frame).
+                          if (isUpOrDown && _recallNotLaidOut) {
+                            return KeyEventResult.handled;
                           }
-
-                          if (event.logicalKey ==
-                                  LogicalKeyboardKey.arrowDown &&
-                              _isOnLastLine()) {
-                            final text = widget.onHistoryDown?.call(
-                              _promptController.text,
+                          if (key == LogicalKeyboardKey.arrowUp &&
+                              _isHistoryKey(0)) {
+                            return _showRecalled(
+                              widget.onHistoryUp?.call(_promptController.text),
+                              caretAtStart: true,
                             );
-                            if (text != null) {
-                              _promptController.value = TextEditingValue(
-                                text: text,
-                                selection: TextSelection.collapsed(
-                                  offset: text.length,
-                                ),
-                              );
-                              return KeyEventResult.handled;
-                            }
-                            return KeyEventResult.ignored;
+                          }
+                          if (key == LogicalKeyboardKey.arrowDown &&
+                              _isHistoryKey(_promptController.text.length)) {
+                            return _showRecalled(
+                              widget.onHistoryDown?.call(
+                                _promptController.text,
+                              ),
+                              caretAtStart: false,
+                            );
                           }
                         }
 

@@ -326,6 +326,100 @@ void main() {
     expect(state.tabs, tabs);
   });
 
+  testWidgets('Up/Down browse prompt history only at the prompt boundaries', (
+    tester,
+  ) async {
+    final pi = await _pumpEditor(tester);
+    for (final prompt in ['first', 'second']) {
+      await _submit(tester, prompt);
+      await pi.finish(tester, pi.requests.length - 1);
+      await tester.tap(find.text('Reject  (Ctrl+Backspace)'));
+      await tester.pump();
+    }
+    await _pressCtrlK(tester);
+    final prompt = tester.widget<TextField>(_promptField).controller!;
+    const draft = 'draft\nline two';
+    await tester.enterText(_promptField, draft);
+    await tester.pump();
+    // Each selection is laid out before the next key, as it would be when the
+    // user places the caret.
+    Future<void> select(TextSelection selection) async {
+      prompt.selection = selection;
+      await tester.pump();
+    }
+
+    // Each of these is a caret movement or selection change, not a recall.
+    await select(const TextSelection.collapsed(offset: 2));
+    await _sendShortcut(tester, LogicalKeyboardKey.arrowUp);
+    expect(prompt.text, draft, reason: 'Up inside the first line');
+    await select(const TextSelection(baseOffset: 0, extentOffset: 5));
+    await _sendShortcut(tester, LogicalKeyboardKey.arrowUp);
+    expect(prompt.text, draft, reason: 'Up with a selection');
+    await select(const TextSelection.collapsed(offset: 0));
+    await _sendShortcut(tester, LogicalKeyboardKey.arrowUp, shift: true);
+    expect(prompt.text, draft, reason: 'Shift+Up at the start');
+
+    await select(const TextSelection.collapsed(offset: 0));
+    await _sendShortcut(tester, LogicalKeyboardKey.arrowUp);
+    expect(prompt.text, 'second');
+    expect(prompt.selection, const TextSelection.collapsed(offset: 0));
+    await _sendShortcut(tester, LogicalKeyboardKey.arrowUp);
+    expect(prompt.text, 'first');
+    expect(prompt.selection, const TextSelection.collapsed(offset: 0));
+
+    await select(const TextSelection.collapsed(offset: 5));
+    await _sendShortcut(tester, LogicalKeyboardKey.arrowDown);
+    expect(prompt.text, 'second');
+    expect(prompt.selection, const TextSelection.collapsed(offset: 6));
+    await _sendShortcut(tester, LogicalKeyboardKey.arrowDown);
+    expect(prompt.text, draft);
+    expect(prompt.selection, TextSelection.collapsed(offset: draft.length));
+  });
+
+  // A recalled prompt is laid out on the next frame; a key that the TextField
+  // handles before then must not act on the previously laid-out text.
+  testWidgets('history keys before the next frame keep the recalled prompt', (
+    tester,
+  ) async {
+    final pi = await _pumpEditor(tester);
+    for (final prompt in ['first', 'second']) {
+      await _submit(tester, prompt);
+      await pi.finish(tester, pi.requests.length - 1);
+      await tester.tap(find.text('Reject  (Ctrl+Backspace)'));
+      await tester.pump();
+    }
+    await _pressCtrlK(tester);
+    final prompt = tester.widget<TextField>(_promptField).controller!;
+
+    // Down right after Up's recall: the caret is at 0, not the end.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(prompt.text, 'second', reason: 'Down');
+
+    // Up at the oldest entry, right after it was recalled.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    expect(prompt.text, 'first', reason: 'Up at the oldest');
+
+    // Recalling the text already shown still schedules the frame that
+    // releases the keys.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await _pressCtrlK(tester);
+    final reopened = tester.widget<TextField>(_promptField).controller!;
+    await tester.enterText(_promptField, 'second');
+    reopened.selection = const TextSelection.collapsed(offset: 0);
+    await tester.pumpAndSettle();
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    expect(reopened.text, 'second');
+    expect(tester.binding.hasScheduledFrame, isTrue);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    expect(reopened.text, 'first');
+  });
+
   testWidgets('accept fails explicitly when the original tab is gone', (
     tester,
   ) async {
@@ -427,10 +521,13 @@ Future<void> _sendShortcut(
   LogicalKeyboardKey key, {
   bool alt = false,
   bool control = false,
+  bool shift = false,
 }) async {
   if (alt) await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
   if (control) await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+  if (shift) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
   await tester.sendKeyEvent(key);
+  if (shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
   if (control) await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
   if (alt) await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
   await tester.pump();

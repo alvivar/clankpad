@@ -628,7 +628,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // ── Prompt history ───────────────────────────────────────────────────────────
 
-  /// Called by [AiPromptPopup] when the user presses Up on the first line.
+  /// Called by [AiPromptPopup] on Up with the caret at the start of the prompt.
   /// Returns the text to display, or null to let the TextField handle the key.
   String? _historyUp(String currentText) {
     if (_promptHistory.isEmpty) return null;
@@ -639,10 +639,10 @@ class _EditorScreenState extends State<EditorScreen> {
       _historyIndex--;
       return _promptHistory[_historyIndex];
     }
-    return null; // already at oldest — let TextField move cursor normally
+    return null; // already at oldest — let the TextField handle the key
   }
 
-  /// Called by [AiPromptPopup] when the user presses Down on the last line.
+  /// Called by [AiPromptPopup] on Down with the caret at the end of the prompt.
   /// Returns the text to display, or null to let the TextField handle the key.
   String? _historyDown(String currentText) {
     if (_historyIndex >= _promptHistory.length) return null;
