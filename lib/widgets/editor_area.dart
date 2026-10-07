@@ -296,6 +296,10 @@ class EditorArea extends StatelessWidget {
               fontSize: 14,
               height: 1.6,
             ),
+            // The default strut forces every line to the body height, which
+            // would make larger Markdown headings overlap their neighbours.
+            // An unforced strut keeps the body height as the minimum.
+            strutStyle: const StrutStyle(forceStrutHeight: false),
             decoration: const InputDecoration(
               border: InputBorder.none,
               contentPadding: EdgeInsets.all(16),

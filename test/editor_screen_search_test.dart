@@ -53,6 +53,55 @@ void main() {
     expect(controller.selection.baseOffset, 3);
   });
 
+  testWidgets('Find scrolls to a Markdown heading below the viewport', (
+    tester,
+  ) async {
+    final state = EditorState();
+    final controller = state.activeTab.controller;
+    controller.text = [
+      for (var i = 0; i < 80; i++) 'line $i',
+      '# Target **heading**',
+      'after `code` target',
+    ].join('\n');
+    await _pumpEditor(tester, state);
+    await _find(tester, 'target');
+    await tester.pump(const Duration(milliseconds: 200));
+
+    final text = controller.text;
+    final heading = text.indexOf('Target');
+    final after = text.indexOf('after');
+    expect(controller.selection, TextSelection.collapsed(offset: heading));
+    expect(_highlights(tester, controller), [
+      (heading, heading + 6),
+      (text.length - 6, text.length),
+    ]);
+
+    final editable = find.byType(EditableText).last;
+    final render = tester.state<EditableTextState>(editable).renderEditable;
+    expect(state.activeTab.scrollController.offset, greaterThan(0));
+    final caret = render.getLocalRectForCaret(TextPosition(offset: heading));
+    expect(
+      tester.getRect(editable).contains(render.localToGlobal(caret.center)),
+      isTrue,
+    );
+
+    // Body lines keep their height (rounded to whole pixels); the heading
+    // line is taller.
+    double top(int offset) => render
+        .getBoxesForSelection(
+          TextSelection(baseOffset: offset, extentOffset: offset + 1),
+        )
+        .single
+        .top;
+    final bodyLine =
+        top(text.indexOf('line 79')) - top(text.indexOf('line 78'));
+    expect(bodyLine, moreOrLessEquals(14 * 1.6, epsilon: 0.5));
+    expect(
+      top(after) - top(text.indexOf('line 79')),
+      greaterThan(2 * bodyLine + 1),
+    );
+  });
+
   testWidgets('search follows the active tab and survives tab close', (
     tester,
   ) async {
@@ -118,23 +167,32 @@ Future<void> _find(WidgetTester tester, String query) async {
 FindBar _findBar(WidgetTester tester) =>
     tester.widget<FindBar>(find.byType(FindBar));
 
-// Ranges painted with a background color, as rendered by the controller.
+// Ranges painted with a Find match background, merged across the pieces
+// Markdown styling splits them into. Adjacent matches would merge.
 List<(int, int)> _highlights(
   WidgetTester tester,
   HighlightingController controller,
 ) {
-  final span = controller.buildTextSpan(
-    context: tester.element(find.byType(EditorScreen)),
-    withComposing: false,
-  );
+  final context = tester.element(find.byType(EditorScreen));
+  final scheme = Theme.of(context).colorScheme;
+  final findColors = {
+    scheme.primaryContainer,
+    scheme.primary.withValues(alpha: 0.35),
+  };
+  final span = controller.buildTextSpan(context: context, withComposing: false);
   final ranges = <(int, int)>[];
   var offset = 0;
-  for (final child in span.children ?? const <InlineSpan>[]) {
-    final text = (child as TextSpan).text!;
-    if (child.style?.backgroundColor != null) {
-      ranges.add((offset, offset + text.length));
+  span.visitChildren((child) {
+    final length = (child as TextSpan).text?.length ?? 0;
+    if (length > 0 && findColors.contains(child.style?.backgroundColor)) {
+      if (ranges.isNotEmpty && ranges.last.$2 == offset) {
+        ranges.last = (ranges.last.$1, offset + length);
+      } else {
+        ranges.add((offset, offset + length));
+      }
     }
-    offset += text.length;
-  }
+    offset += length;
+    return true;
+  });
   return ranges;
 }
