@@ -73,11 +73,11 @@ A single line at the bottom of the window. Dense, informative, unobtrusive.
 
 Features that make Clankpad useful beyond a plain scratchpad — without turning it into an IDE.
 
-- [ ] **Syntax highlighting** — even basic keyword coloring makes code significantly more readable. Detect language from file extension. Start with a small set: Python, JavaScript/TypeScript, Dart, Rust, Go, C/C++, JSON, YAML, Markdown, SQL, HTML/CSS. Use a tree-sitter grammar or a simpler regex-based highlighter. This is the single biggest upgrade for a developer-facing editor.
+- [ ] **Syntax highlighting** — even basic keyword coloring makes code significantly more readable. Detect language from file extension. Start with a small set: Python, JavaScript/TypeScript, Dart, Rust, Go, C/C++, JSON, YAML, SQL, HTML/CSS (Markdown syntax is already styled in every tab). Use a tree-sitter grammar or a simpler regex-based highlighter. This is the single biggest upgrade for a developer-facing editor.
 - [ ] **Minimap** — a narrow column on the right showing a zoomed-out view of the file. Click to navigate. Useful for orientation in longer files.
 - [ ] **Sticky scroll / breadcrumb** — show the current function/class/section name at the top of the editor when scrolled deep into a file. Requires parsing; could start with indent-based heuristics.
 - [ ] **Diff two tabs** — select two open tabs and see a side-by-side diff. Useful for comparing AI output variations, before/after edits, or two versions of a spec.
-- [ ] **Markdown-first editing** — make Clankpad a Markdown-first editor, with preview as one part of the experience.
+- [ ] **Markdown-first editing** — make Clankpad a Markdown-first editor, with preview as one part of the experience. First step shipped: live Markdown syntax styling with dimmed delimiters in every tab. Still open: preview/rendering, and an Obsidian-style live preview that hides delimiters.
 - [ ] **Open containing folder** — right-click tab → "Reveal in Explorer". One click to get to the file's directory.
 - [ ] **Copy file path** — right-click tab → "Copy Path" / "Copy Relative Path". Useful for pasting into terminal commands or AI prompts.
 - [ ] **Encoding handling** — detect file encoding on open (UTF-8, UTF-16, Latin-1). Show in status bar. Allow conversion on save.

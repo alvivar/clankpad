@@ -106,6 +106,32 @@ Closing a dirty tab prompts:
 
 ---
 
+### Markdown Styling
+
+Every tab styles Markdown syntax as you type, regardless of file extension. Delimiters such as `#`, `**` and `` ` `` stay visible but dimmed. Text stays in Consolas; headings are bold, and H1–H3 are larger.
+
+Supported syntax:
+
+- ATX headings: `#` to `######` followed by a space
+- `**bold**` / `__bold__`, `*italic*` / `_italic_`, `~~strikethrough~~`
+- `` `inline code` ``
+- Fenced code blocks with ```` ``` ```` or `~~~` (uniform code tint; no language-specific highlighting)
+- `>` quotes
+- List markers (`-`, `*`, `+`, `1.`) and task markers (`[ ]`, `[x]`)
+- `[text](url)` links
+- Rules: `---`, `***`, `___`
+
+Limits:
+
+- Styling only; this is not a Markdown preview or renderer.
+- Links and task checkboxes are not clickable.
+- Tables, images and HTML are not rendered.
+- Inline syntax does not span lines.
+- There is no setting to turn styling off.
+- Inside Find's current match, text uses the normal text color while delimiters remain dimmed.
+
+---
+
 ### Find (`Ctrl+F`)
 
 The find bar appears between the tab bar and editor.
