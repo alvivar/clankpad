@@ -274,43 +274,71 @@ class EditorArea extends StatelessWidget {
         onKeyEvent: (_, event) => _handleKeyEvent(event),
         child: Actions(
           actions: readOnly ? _readOnlyActions : const {},
-          child: TextField(
-            // No ValueKey — the same TextField element is reused across tab
-            // switches. Only controller and scrollController change, so focus
-            // never leaves the element during a tab switch.
-            controller: tab.controller,
-            scrollController: tab.scrollController,
-            focusNode: focusNode,
-            // autofocus fires once when the TextField is first inserted (app
-            // startup). After that, focus is managed explicitly via focusNode.
-            autofocus: true,
-            readOnly: readOnly,
+          child: ScrollConfiguration(
+            behavior: const _ArrowOverScrollbarBehavior(),
+            child: TextField(
+              // No ValueKey — the same TextField element is reused across tab
+              // switches. Only controller and scrollController change, so focus
+              // never leaves the element during a tab switch.
+              controller: tab.controller,
+              scrollController: tab.scrollController,
+              focusNode: focusNode,
+              // autofocus fires once when the TextField is first inserted (app
+              // startup). After that, focus is managed explicitly via focusNode.
+              autofocus: true,
+              readOnly: readOnly,
 
-            // Word wrap on, vertical scroll only (Phase 1 default).
-            maxLines: null,
-            expands: true,
-            textAlignVertical: TextAlignVertical.top,
+              // Word wrap on, vertical scroll only (Phase 1 default).
+              maxLines: null,
+              expands: true,
+              textAlignVertical: TextAlignVertical.top,
 
-            style: const TextStyle(
-              fontFamily: 'Consolas',
-              fontSize: 14,
-              height: 1.6,
+              style: const TextStyle(
+                fontFamily: 'Consolas',
+                fontSize: 14,
+                height: 1.6,
+              ),
+              // The default strut forces every line to the body height, which
+              // would make larger Markdown headings overlap their neighbours.
+              // An unforced strut keeps the body height as the minimum.
+              strutStyle: const StrutStyle(forceStrutHeight: false),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.all(16),
+                // Suppress the default focus ring / underline on desktop.
+                focusedBorder: InputBorder.none,
+                enabledBorder: InputBorder.none,
+              ),
+              cursorWidth: 1.5,
             ),
-            // The default strut forces every line to the body height, which
-            // would make larger Markdown headings overlap their neighbours.
-            // An unforced strut keeps the body height as the minimum.
-            strutStyle: const StrutStyle(forceStrutHeight: false),
-            decoration: const InputDecoration(
-              border: InputBorder.none,
-              contentPadding: EdgeInsets.all(16),
-              // Suppress the default focus ring / underline on desktop.
-              focusedBorder: InputBorder.none,
-              enabledBorder: InputBorder.none,
-            ),
-            cursorWidth: 1.5,
           ),
         ),
       ),
     );
   }
+}
+
+/// Shows the arrow cursor over the editor's scrollbar instead of the
+/// TextField's I-beam.
+///
+/// The scrollbar paints over the text, and while it is visible it absorbs
+/// hits on its track and thumb, so the inner text region is not reached
+/// there and the outer arrow region applies. A hidden scrollbar is not hit,
+/// so the text cursor stays everywhere else.
+class _ArrowOverScrollbarBehavior extends MaterialScrollBehavior {
+  const _ArrowOverScrollbarBehavior();
+
+  @override
+  Widget buildScrollbar(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) => MouseRegion(
+    cursor: SystemMouseCursors.basic,
+    child: super.buildScrollbar(
+      context,
+      MouseRegion(cursor: SystemMouseCursors.text, child: child),
+      details,
+    ),
+  );
 }
